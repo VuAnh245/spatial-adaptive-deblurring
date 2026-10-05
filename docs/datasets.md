@@ -22,7 +22,7 @@ Tải tự động phần có thể bằng `bash scripts/download_data.sh`; Real
 | Phần giải nén | chỉ `train/*/sharp`, `test/*/sharp`, `test/*/blur` (bỏ `train/*/blur`, `*/blur_gamma`: không dùng), 4,3 GB |
 | Đếm được | train 22 chuỗi / 2.103 ảnh nét; test 11 chuỗi / 1.111 cặp; 1280×720 RGB |
 
-Lưu ý: split chính thức có chuỗi train và test cắt từ cùng một video gốc (ví dụ `GOPR0384_11_00` ở test, `GOPR0384_11_01..04` ở train). Đây là split chuẩn của cộng đồng, giữ nguyên; ghi vào mục Giới hạn. Thống kê theo nhóm dùng đơn vị chuỗi (11 nhóm ở test).
+Lưu ý: split chính thức có chuỗi train và test cắt từ cùng một video gốc (ví dụ `GOPR0384_11_00` ở test, `GOPR0384_11_01..04` ở train). Đây là split chuẩn của cộng đồng, giữ nguyên; ghi vào mục Giới hạn (5 trong 10 video test trùng với train, xem `docs/experiments.md`). Thống kê theo nhóm dùng đơn vị **video** (10 nhóm ở test, QĐ-05). Val gồm 2 chuỗi từ các video có đúng một đoạn trong train và không có ở test.
 
 ## RealBlur-J (CC BY 4.0)
 

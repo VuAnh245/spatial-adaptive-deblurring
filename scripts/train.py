@@ -15,6 +15,7 @@ from pathlib import Path
 
 T_START = time.time()
 
+import numpy as np
 import torch
 import yaml
 from torch.utils.data import DataLoader, Subset
@@ -99,15 +100,21 @@ def main() -> None:
     val_set = FixedSyntheticDataset(Path(d["synthetic_root"]) / "val")
 
     def val_fn(model):
-        ps, sp = [], []
+        ps, sp, mae = [], [], []
         for i in range(0, len(val_set), max(1, len(val_set) // 50)):
             s = val_set[i]
             x = s["blur"][None].to(a.device)
             pred, s_hat = model(x)
             ps.append(psnr(pred[0].clamp(0, 1).permute(1, 2, 0).cpu().numpy(), s["sharp"].permute(1, 2, 0).numpy()))
             if s_hat is not None:
-                sp.append(map_quality(s_hat.cpu(), s["smap"][None])["spearman"])
-        return {"val_psnr": float(sum(ps) / len(ps)), **({"val_spearman": float(sum(sp) / len(sp))} if sp else {})}
+                q = map_quality(s_hat.cpu(), s["smap"][None])
+                mae.append(q["mae"])
+                if s["regions"] > 1:  # Spearman is undefined for a constant map (R = 1)
+                    sp.append(q["spearman"])
+        out = {"val_psnr": float(np.mean(ps))}
+        if mae:
+            out.update(val_map_mae=float(np.mean(mae)), val_spearman=float(np.nanmean(sp)) if sp else float("nan"))
+        return out
 
     trainer = Trainer(model, make_loss(cfg["loss"]["lambda_map"]), loader, out, lr=t["lr"],
                       iterations=t["iterations"], warmup=t["warmup"], min_lr=t["min_lr"],

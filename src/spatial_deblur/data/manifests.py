@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -39,12 +40,22 @@ def scene_of(rel_path: str, depth: int = 1) -> str:
     return "/".join(parts[:depth])
 
 
-def split_by_scene(items: list[str], fraction: float, seed: int, depth: int = 1
+def video_of(rel_path: str, depth: int = 1) -> str:
+    """Source video of an image: the sequence folder (component ``depth``) without its clip suffix.
+    GoPro 'train/GOPR0374_11_02/sharp/x.png' (depth=2) -> 'GOPR0374_11'. Clips cut from one
+    recording share content, so splits are made and checked at this level (QĐ-05)."""
+    seq = Path(rel_path).parts[depth - 1]
+    return re.sub(r"_\d+$", "", seq) if re.search(r"_\d+_\d+$", seq) else seq
+
+
+def split_by_scene(items: list[str], fraction: float, seed: int, depth: int = 1, level: str = "video"
                    ) -> tuple[list[str], list[str]]:
-    """Select ``fraction`` of SCENES (all their images) -> (selected, rest)."""
+    """Select ``fraction`` of the groups (all their images) -> (selected, rest).
+    ``level='video'`` groups clips of the same recording together; ``'scene'`` uses the folder as is."""
+    key = (lambda it: video_of(it, depth)) if level == "video" else (lambda it: scene_of(it, depth))
     groups: dict[str, list[str]] = defaultdict(list)
     for it in items:
-        groups[scene_of(it, depth)].append(it)
+        groups[key(it)].append(it)
     scenes = sorted(groups)
     random.Random(seed).shuffle(scenes)
     k = max(1, round(fraction * len(scenes)))
@@ -54,10 +65,12 @@ def split_by_scene(items: list[str], fraction: float, seed: int, depth: int = 1
     return sel, rest
 
 
-def assert_disjoint_scenes(*splits: list[str], depth: int = 1) -> None:
+def assert_disjoint_scenes(*splits: list[str], depth: int = 1, level: str = "video") -> None:
+    """No group (video by default, or scene folder) may appear in two of the given splits."""
+    key = (lambda it: video_of(it, depth)) if level == "video" else (lambda it: scene_of(it, depth))
     seen: dict[str, int] = {}
     for idx, split in enumerate(splits):
-        for s in {scene_of(i, depth) for i in split}:
+        for s in {key(i) for i in split}:
             if s in seen and seen[s] != idx:
-                raise AssertionError(f"scene {s} appears in split {seen[s]} and {idx}")
+                raise AssertionError(f"{level} {s} appears in split {seen[s]} and {idx}")
             seen[s] = idx

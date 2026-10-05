@@ -2,6 +2,8 @@
 
     python scripts/compare.py results/SA-13_eval_test_in_pred_tlc.csv results/SA-12_eval_test_in_pred_tlc.csv --metric psnr
 
+Groups (QĐ-05): per-image scores are averaged per source VIDEO (10 groups on GoPro test) before the
+Wilcoxon test, bootstrap CI and group win rate; the per-image win rate is reported alongside.
 The JSON keeps every ID next to its readable label (docs/naming.md), e.g.
 a_id "SA-13" / a_label "SFT-Map", comparison_label "Phép thử giám sát (chính)",
 split_id "test_in" / split_label "Tổng hợp trong phân phối".
@@ -42,11 +44,19 @@ def main() -> None:
     ap.add_argument("a")
     ap.add_argument("b")
     ap.add_argument("--metric", default="psnr")
+    ap.add_argument("--group-by", default="video", choices=["video", "sequence"],
+                    help="QĐ-05: average per source video (clips GOPRxxxx_yy_NN merged) before testing")
     args = ap.parse_args()
     sa, ga = read(args.a, args.metric)
     sb, _ = read(args.b, args.metric)
+    if args.group_by == "video":
+        ga = {k: re.sub(r"_\d+$", "", g) if re.search(r"_\d+_\d+$", g) else g for k, g in ga.items()}
     res = paired_comparison(group_mean(sa, ga), group_mean(sb, ga))
     res["verdict"] = verdict(res)
+    shared = sorted(set(sa) & set(sb))
+    res["group_by"] = args.group_by
+    res["n_images"] = len(shared)
+    res["win_rate_images"] = float(sum(sa[k] > sb[k] for k in shared) / len(shared))  # reported next to group stats
     da, split_a = describe(args.a, "a")
     db, split_b = describe(args.b, "b")
     if split_a and split_b and split_a != split_b:

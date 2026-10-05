@@ -60,10 +60,24 @@ def test_blur_maps():
 
 
 def test_split_by_scene_is_disjoint():
-    items = [f"train/scene{i // 5}/img{i}.png" for i in range(100)]
-    sel, rest = split_by_scene(items, 0.25, seed=0, depth=2)
-    assert_disjoint_scenes(sel, rest, depth=2)
-    assert len({s.split("/")[1] for s in sel}) == 5
+    """Splits are disjoint at VIDEO level: clips GOPRxxxx_yy_NN of one recording stay on one side."""
+    from spatial_deblur.data.manifests import video_of
+    # 10 videos x 2 clips x 5 frames
+    items = [f"train/GOPR{i // 10:04d}_11_{(i // 5) % 2:02d}/sharp/{i:06d}.png" for i in range(100)]
+    assert video_of(items[0], 2) == "GOPR0000_11" and video_of("train/scene3/img.png", 2) == "scene3"
+    sel, rest = split_by_scene(items, 0.3, seed=0, depth=2)
+    assert_disjoint_scenes(sel, rest, depth=2, level="video")
+    assert not {video_of(s, 2) for s in sel} & {video_of(r, 2) for r in rest}
+    assert len({video_of(s, 2) for s in sel}) == 3 and len(sel) == 30
+    # a clip-level split of the same items shares videos and must be rejected at video level
+    clip_a = [it for it in items if it.split("/")[1].endswith("_00")]
+    clip_b = [it for it in items if it.split("/")[1].endswith("_01")]
+    assert_disjoint_scenes(clip_a, clip_b, depth=2, level="scene")
+    try:
+        assert_disjoint_scenes(clip_a, clip_b, depth=2, level="video")
+        raise RuntimeError("video overlap not detected")
+    except AssertionError:
+        pass
 
 
 def test_psnr_and_stats():

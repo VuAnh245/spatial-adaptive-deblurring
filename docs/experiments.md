@@ -61,12 +61,44 @@ Phương án "Một ITERS cho mọi mô hình, gói vừa một phiên":
     SFT-Free có cùng kiến trúc với SFT-Map, Baseline nhẹ nhất), sao cho một phiên Kaggle 12 giờ chứa đủ
     khởi động, đánh giá val (mỗi 2500 iter, kèm lần ở bước 0), checkpoint (mỗi 2500 iter) và chừa khoảng 1 giờ dự phòng.
     Tính bằng `analysis/pilot_report.py` (khối "budget");
-(3) lr: pilot chạy 1200 iter (qua hết warmup 1000, tức đã ở lr đỉnh 2e-4), val ở bước 0, 600, 1200;
-    nếu val PSNR ở bước 1200 tụt quá 0,3 dB so với bước 0 thì hạ lr xuống trong khoảng 1e-4 đến 2e-4
-    và chạy lại pilot trước khi khóa; không tune lại sau khi đã train bất kỳ biến thể nào;
+(3) lr: kiểm tra trên pilot lần một (SFT-Map, 1200 iter, qua hết warmup 1000, tức đã ở lr đỉnh 2e-4, val ở bước
+    0, 600, 1200); nếu val PSNR ở bước 1200 tụt quá 0,3 dB so với bước 0 thì hạ lr xuống trong khoảng 1e-4 đến 2e-4
+    và chạy lại pilot trước khi khóa; không tune lại sau khi đã train bất kỳ biến thể nào.
+    Pilot lần hai (300 iter, SFT-Map và Baseline-L theo QĐ-06 chạy song song, val mới) chỉ đo tốc độ, bộ nhớ,
+    val mới và Spearman; ITERS tính từ pilot lần hai;
 (4) chặn thời gian: notebook dừng mọi tiến trình train sau 11 giờ (SIGTERM, lưu `last.pth`), resume ở phiên sau.
 
 ITERS = (điền sau pilot) | VAL_EVERY = 2500 | CKPT_EVERY = 2500
+
+## QĐ-05 Đơn vị gộp khi kiểm định (chốt 2026-10-06, trước mọi đánh giá)
+
+Phương án "Gộp theo video": điểm từng ảnh được lấy trung bình theo **video nguồn** (`GOPRxxxx_yy`, gộp các đoạn
+`_NN` của cùng một lần quay) rồi mới chạy Wilcoxon, bootstrap CI và tỉ lệ thắng theo nhóm. GoPro test có 11 chuỗi
+nhưng chỉ 10 video (`GOPR0384_11_00` và `GOPR0384_11_05` cùng video), nên có **10 nhóm**. Báo kèm tỉ lệ thắng theo ảnh
+(`win_rate_images`). Cài ở `scripts/compare.py --group-by video` (mặc định).
+
+## QĐ-06 Quy tắc khớp tham số của Baseline-L (chốt 2026-10-06)
+
+Phương án "Ít block nhất, lệch ≤ 5% phần thêm": Baseline-L = Baseline + ít NAFBlock khởi tạo đồng nhất nhất,
+đặt trong một stage decoder, sao cho số tham số thêm vào lệch không quá 5% so với phần SFT-Map thêm vào Baseline.
+Kết quả với NAFNet-32: **2 block ở `dec1`** (c = 128, 1/4 độ phân giải), thêm 237.824 tham số so với 230.273 của SFT-Map
+(+3,3%), tổng **17.349.731** tham số. Test: GMACs của Baseline-L không vượt SFT-Map quá 10%.
+
+Lý do bỏ quy tắc cũ ("khớp tuyệt đối"): quy tắc cũ chọn 28 block ở `dec3` (độ phân giải đầy đủ), khớp tới 1 tham số
+nhưng chi phí tính toán và bộ nhớ vượt xa SFT-Map, gây out of memory ở batch 8 trong pilot lần một, và làm Phép thử
+tham số không còn so sánh dung lượng một cách công bằng. Ràng buộc gốc "lệch < 2% tổng tham số" quá lỏng (phần thêm của
+SFT-Map chỉ chiếm khoảng 1,35% tổng) nên không phân biệt được các phương án.
+
+## Giới hạn đã biết (đưa vào chương Giới hạn của báo cáo)
+
+(1) Split chính thức của GoPro có train và test chung video: 5 trong 10 video test (6 trong 11 chuỗi test) có đoạn khác
+    nằm trong train: GOPR0384_11, GOPR0385_11, GOPR0868_11, GOPR0871_11, GOPR0881_11. Ảnh test tổng hợp được sinh từ
+    frame nét của các chuỗi test, nên mô hình đã thấy cảnh tương tự khi train. Mức trùng như nhau cho mọi biến thể,
+    không ảnh hưởng phép so sánh, nhưng làm số tuyệt đối lạc quan hơn. Giữ split chính thức để so được với các công bố.
+(2) Val chỉ lấy từ các video có đúng một đoạn trong train và không có đoạn nào ở test, nên val không chung video
+    với train lẫn test. Val chỉ có 2 video nên chỉ dùng để theo dõi và kiểm tra lr, không để chọn checkpoint.
+(3) Thang vùng nhòe: ô vùng ở test vẫn lớn hơn ở train khoảng 1,3 đến 2,7 lần (QĐ-02).
+(4) SSIM tính bằng `skimage`, khác cách cài của BasicSR, nên không so trực tiếp với số SSIM công bố (SA-00).
 
 ## Log chẩn đoán khi train
 

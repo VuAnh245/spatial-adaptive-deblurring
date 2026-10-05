@@ -2,7 +2,7 @@
 
 | ID  | Spatial branch | Supervised (L_map) | Channel branch |
 | A0  | -              | -                  | -              |
-| A0+ | - (extra identity-initialised NAFBlocks, params ~= A2) | - | - |
+| A0+ | - (fewest extra identity NAFBlocks matching A2's extra params within 5%) | - | - |
 | A1  | yes            | no (lambda_map = 0)| -              |
 | A2  | yes            | yes                | -              |
 | A3  | yes            | yes                | yes            |
@@ -15,6 +15,8 @@ the loss, not here.
 inference (oracle test SA-20, shuffle test SA-21).
 """
 from __future__ import annotations
+
+import math
 
 import torch
 import torch.nn as nn
@@ -88,30 +90,34 @@ def n_params(m: nn.Module) -> int:
     return sum(p.numel() for p in m.parameters())
 
 
-def build_param_matched(reference: nn.Module, kw: dict, tolerance: float = 0.02) -> nn.Module:
-    """A0 + extra identity-initialised NAFBlocks until params ~= reference (within 2%).
+def build_param_matched(reference: nn.Module, kw: dict, tolerance: float = 0.05) -> nn.Module:
+    """Baseline-L (A0+): A0 + the FEWEST identity-initialised NAFBlocks in one decoder stage whose
+    parameters match the extra parameters of ``reference`` (A2 - A0) within ``tolerance`` (QĐ-06).
 
-    Blocks are appended to the decoder stage whose block size gives the
-    smallest final gap. NAFBlock residual scales start at zero, so the extra
-    blocks are identity maps and the public checkpoint still loads
-    (with strict=False for the new keys).
+    Every NAFBlock costs about the same MACs at any stage of this U-Net (7c^2 x pixels is constant),
+    so fewest blocks = least added compute. The earlier rule (smallest absolute gap) picked 28 blocks
+    at full resolution: far more compute than A2 and out of memory at batch 8.
+    NAFBlock residual scales start at zero, so the extra blocks are identity maps and the public
+    checkpoint still loads (strict=False for the new keys).
     """
-    target = n_params(reference)
     base = ModulatedNAFNet(spatial=False, channel=False, **kw)
-    gap = target - n_params(base)
+    gap = n_params(reference) - n_params(base)
     best = None
     for i, c in enumerate(base.dec_channels):
         per = n_params(NAFBlock(c))
-        k = max(0, round(gap / per))
-        err = abs(gap - k * per)
-        if best is None or err < best[2]:
-            best = (i, k, err)
+        for k in range(1, math.ceil(gap * (1 + tolerance) / per) + 1):
+            err = abs(k * per - gap) / gap
+            if err <= tolerance:
+                if best is None or (k, err) < (best[1], best[2]):
+                    best = (i, k, err)
+                break
+    if best is None:
+        raise RuntimeError(f"param match failed: no decoder stage within {tolerance:.0%} of the extra {gap} params")
     i, k, err = best
     dec = list(kw["dec_blk_nums"])
     dec[i] += k
     model = ModulatedNAFNet(spatial=False, channel=False, **{**kw, "dec_blk_nums": tuple(dec)})
-    rel = abs(n_params(model) - target) / target
-    if rel > tolerance:
-        raise RuntimeError(f"param match failed: {rel:.3%} > {tolerance:.0%}")
-    model.param_match_info = {"stage": f"dec{i}", "extra_blocks": k, "rel_diff": rel}
+    model.param_match_info = {"stage": f"dec{i}", "extra_blocks": k, "extra_params": k * n_params(NAFBlock(base.dec_channels[i])),
+                              "target_extra": gap, "rel_diff_extra": err,
+                              "rel_diff_total": abs(n_params(model) - n_params(reference)) / n_params(reference)}
     return model

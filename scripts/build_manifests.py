@@ -2,7 +2,8 @@
 
     python scripts/build_manifests.py --gopro data/GOPRO_Large [--realblur data/RealBlur]
 
-- gopro_sharp_train.txt / gopro_sharp_val.txt: sharp frames, 2 train sequences held out for val
+- gopro_sharp_train.txt / gopro_sharp_val.txt: sharp frames, 2 train sequences held out for val, taken
+  from videos with a single clip in train and none in test (no recording shared with train or test)
 - gopro_sharp_test.txt: sharp frames of the official test sequences
 - gopro_test_pairs.txt: blur<TAB>sharp for the 1,111 official test pairs
 - realblur_j_test_pairs.txt: from the official RealBlur_J_test_list.txt (gt first, blur second)
@@ -13,7 +14,7 @@ import argparse
 import random
 from pathlib import Path
 
-from spatial_deblur.data.manifests import assert_disjoint_scenes, write_list
+from spatial_deblur.data.manifests import assert_disjoint_scenes, video_of, write_list
 
 
 def frames(root: Path, split: str, kind: str) -> list[str]:
@@ -30,13 +31,26 @@ def main() -> None:
     a = ap.parse_args()
     root = Path(a.gopro)
     train_sharp = frames(root, "train", "sharp")
-    seqs = sorted({Path(p).parts[1] for p in train_sharp})
-    random.Random(a.seed).shuffle(seqs)
-    val_seqs = set(seqs[: a.val_sequences])
+    te = frames(root, "test", "sharp")
+    # Val (QĐ-05 follow-up): sequences whose video has exactly ONE clip in train and no clip in test,
+    # so val shares no recording with train or test. The official train/test split itself shares videos
+    # (reported as a limitation), which is why only val/train and val/test are asserted below.
+    clips_per_video: dict[str, set] = {}
+    for p in train_sharp:
+        clips_per_video.setdefault(video_of(p, 2), set()).add(Path(p).parts[1])
+    test_videos = {video_of(p, 2) for p in te}
+    candidates = sorted(next(iter(c)) for v, c in clips_per_video.items() if len(c) == 1 and v not in test_videos)
+    if len(candidates) < a.val_sequences:
+        raise SystemExit(f"only {len(candidates)} candidate val sequences: {candidates}")
+    random.Random(a.seed).shuffle(candidates)
+    val_seqs = set(candidates[: a.val_sequences])
     tr = [p for p in train_sharp if Path(p).parts[1] not in val_seqs]
     va = [p for p in train_sharp if Path(p).parts[1] in val_seqs]
-    te = frames(root, "test", "sharp")
-    assert_disjoint_scenes(tr, va, te, depth=2)
+    assert_disjoint_scenes(tr, va, depth=2, level="video")
+    assert_disjoint_scenes(va, te, depth=2, level="video")
+    shared = sorted({video_of(p, 2) for p in tr} & test_videos)
+    print(f"val candidates ({len(candidates)}): {sorted(candidates)}")
+    print(f"official train/test share {len(shared)} of {len(test_videos)} test videos: {shared}")
     write_list("manifests/gopro_sharp_train.txt", tr)
     write_list("manifests/gopro_sharp_val.txt", va)
     write_list("manifests/gopro_sharp_test.txt", te)

@@ -40,11 +40,29 @@ def test_oracle_override_changes_nothing_at_init_but_is_used_after_update():
     assert not torch.allclose(a, b)
 
 
-def test_param_match_within_two_percent():
-    ref = build_variant("A2", TINY)
+def test_param_match_within_five_percent_of_extra():
+    """QĐ-06: Baseline-L adds the fewest blocks whose params match SFT-Map's extra params within 5%."""
+    ref, base = build_variant("A2", TINY), build_variant("A0", TINY)
     m = build_variant("A0+", TINY)
-    assert abs(n_params(m) - n_params(ref)) / n_params(ref) <= 0.02
-    assert m.param_match_info["extra_blocks"] >= 0
+    extra = n_params(ref) - n_params(base)
+    assert abs((n_params(m) - n_params(base)) - extra) / extra <= 0.05
+    assert m.param_match_info["extra_blocks"] >= 1
+
+
+def _conv_gmacs(model, size=256):
+    """GMACs of all convolutions for one 3 x size x size image (forward hooks; elementwise ops ignored)."""
+    total = [0]
+
+    def hook(mod, inp, out):
+        kh, kw = mod.kernel_size
+        total[0] += out.numel() // out.shape[0] * (mod.in_channels // mod.groups) * kh * kw
+
+    hs = [mod.register_forward_hook(hook) for mod in model.modules() if isinstance(mod, torch.nn.Conv2d)]
+    with torch.no_grad():
+        model.eval()(torch.rand(1, 3, size, size))
+    for h in hs:
+        h.remove()
+    return total[0] / 1e9
 
 
 def test_tlc_converts_every_global_pool_including_a3_channel_branch():
@@ -172,6 +190,12 @@ def test_trainer_val_at_start_and_graceful_stop(tmp_path):
 
 
 def test_param_match_real_config():
-    ref = build_variant("A2")
+    """QĐ-06 on NAFNet-32: 2 blocks at dec1 (17,349,731 params); compute stays within 10% of SFT-Map."""
+    ref, base = build_variant("A2"), build_variant("A0")
     m = build_variant("A0+")
-    assert abs(n_params(m) - n_params(ref)) / n_params(ref) <= 0.02
+    assert m.param_match_info["stage"] == "dec1" and m.param_match_info["extra_blocks"] == 2
+    assert n_params(m) == 17_349_731
+    extra = n_params(ref) - n_params(base)
+    assert abs((n_params(m) - n_params(base)) - extra) / extra <= 0.05
+    g_plus, g_map = _conv_gmacs(m), _conv_gmacs(ref)
+    assert g_plus <= 1.10 * g_map, (g_plus, g_map)

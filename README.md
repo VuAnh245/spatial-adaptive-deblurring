@@ -17,7 +17,7 @@ không giám sát, và tốt hơn việc chỉ thêm tham số không?
 | ID | Tên đọc được | Mô tả | Config |
 | --- | --- | --- | --- |
 | A0 | NAFNet gốc (Baseline) | NAFNet-32, không modulation | `configs/experiments/SA-10_a0.yaml` |
-| A0+ | NAFNet tăng tham số (Baseline-L) | A0 + NAFBlock khởi tạo đồng nhất, số tham số bằng A2 (sai lệch < 2%) | `SA-11_a0plus.yaml` |
+| A0+ | NAFNet tăng tham số (Baseline-L) | A0 + 2 NAFBlock khởi tạo đồng nhất ở dec1, phần tham số thêm vào lệch ≤ 5% so với phần thêm của A2 (QĐ-06) | `SA-11_a0plus.yaml` |
 | A1 | Điều biến tự do (SFT-Free) | Bộ ước lượng + SFT theo không gian, **không** giám sát (lambda_map = 0) | `SA-12_a1.yaml` |
 | A2 | Điều biến theo bản đồ nhòe (SFT-Map), mô hình đề xuất | Như A1 + giám sát L_map | `SA-13_a2.yaml` |
 | A3 | Điều biến theo bản đồ nhòe + kênh (SFT-Map+Ch) | A2 + nhánh channel | `SA-14_a3.yaml` |

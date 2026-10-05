@@ -23,6 +23,14 @@ Shared modules (`src/spatial_deblur/{data,degradations,models,classical,engine,m
   returns `fit() -> False` (used for SIGTERM at the notebook time cap).
   `last.pth` also stores torch / CUDA / numpy / python RNG states; `resume` restores them and loads with
   `weights_only=False` (own file; default became True in torch 2.6).
+- `data/manifests`: `video_of`, and `split_by_scene` / `assert_disjoint_scenes(level="video")` (default) check
+  splits at source-video level (clips `GOPRxxxx_yy_NN` merged). `build_manifests.py` picks val from videos with a
+  single clip in train and none in test. Val changed: old sequences GOPR0374_11_00 + GOPR0386_11_00
+  (GOPR0374_11 had 3 more clips in train), content sha256 `5350747d6c56f2b6`; new val sha256: (fill in after
+  the first generation on Kaggle).
+- `scripts/compare.py --group-by video` (default, QĐ-05) and `win_rate_images`.
+- Study code (not shared): Baseline-L param matching QĐ-06 (2 blocks at dec1 instead of 28 at dec3);
+  val Spearman only on R >= 2 with nanmean (was NaN), plus `val_map_mae`.
 - Test sets reduced for the 5-day schedule (val 50/R, test_in 100/R, ood 100, straight/curved 50).
 
 ## core-v0.1.0 - 2026-10-04
