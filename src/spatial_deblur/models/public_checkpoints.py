@@ -24,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .nafnet import load_official_checkpoint, nafnet_gopro_width32
+from .tlc import convert_tlc
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -58,10 +59,13 @@ def _strip_module(state: dict) -> dict:
     return {k[7:] if k.startswith("module.") else k: v for k, v in state.items()}
 
 
-def load_nafnet_public(ckpt: str | Path = ROOT / "checkpoints/NAFNet-GoPro-width32.pth") -> nn.Module:
+def load_nafnet_public(ckpt: str | Path = ROOT / "checkpoints/NAFNet-GoPro-width32.pth",
+                       tlc: bool = False) -> nn.Module:
+    """``tlc=True`` reproduces the official GoPro test setting (NAFNetLocal)."""
     model = nafnet_gopro_width32()
     load_official_checkpoint(model, str(ckpt), strict=True)
-    return model.eval()
+    model.eval()
+    return convert_tlc(model) if tlc else model
 
 
 def load_restormer_public(ckpt: str | Path = ROOT / "checkpoints/motion_deblurring.pth") -> nn.Module:

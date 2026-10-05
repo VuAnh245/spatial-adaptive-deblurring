@@ -69,3 +69,30 @@ def test_nafnet_shapes_and_padding():
     m = NAFNet(width=8, enc_blk_nums=(1, 1, 1, 1), dec_blk_nums=(1, 1, 1, 1))
     x = torch.rand(1, 3, 37, 50)
     assert m(x).shape == x.shape
+
+
+def test_local_avg_pool_matches_sliding_mean():
+    import torch.nn.functional as F
+    from spatial_deblur.models.tlc import LocalAvgPool2d
+    p = LocalAvgPool2d((6, 6), (4, 4))
+    p.kernel_size = [3, 5]
+    x = torch.rand(2, 4, 9, 11)
+    ref = F.avg_pool2d(x, (3, 5), stride=1)
+    ref = F.pad(ref, (2, 2, 1, 1), mode="replicate")
+    assert torch.allclose(p(x), ref, atol=1e-5)
+
+
+def test_tlc_is_identity_at_train_size_and_local_beyond():
+    import copy
+    from spatial_deblur.models.tlc import LocalAvgPool2d, convert_tlc
+    torch.manual_seed(0)
+    m = NAFNet(width=8, enc_blk_nums=(1, 1, 1, 1), dec_blk_nums=(1, 1, 1, 1)).eval()
+    for blk in m.modules():  # non-zero residual scales so the blocks are not identities
+        if hasattr(blk, "beta"):
+            blk.beta.data.normal_(0, 0.5); blk.gamma.data.normal_(0, 0.5)
+    t = convert_tlc(copy.deepcopy(m), train_size=32)
+    assert any(isinstance(x, LocalAvgPool2d) for x in t.modules())
+    with torch.no_grad():
+        small, big = torch.rand(1, 3, 32, 32), torch.rand(1, 3, 96, 128)
+        assert torch.allclose(m(small), t(small), atol=1e-5)
+        assert not torch.allclose(m(big), t(big), atol=1e-5)
