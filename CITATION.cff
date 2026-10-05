@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite it as below."
+title: "Spatially Adaptive Deblurring for Non-Uniform Motion Blur"
+authors:
+  - family-names: "Vu"
+    given-names: "Xuan Anh"
+    affiliation: "Hung Yen University of Technology and Education (UTEHY)"
+version: 0.1.0
+date-released: 2026-10-04
+repository-code: "https://github.com/<user>/spatial-adaptive-deblurring"

@@ -1,0 +1,9 @@
+model:
+  backbone: nafnet
+  width: 32
+  middle_blk_num: 1
+  enc_blk_nums: [1, 1, 1, 28]
+  dec_blk_nums: [1, 1, 1, 1]
+  init_checkpoint: checkpoints/NAFNet-GoPro-width32.pth
+  variant: A0
+  detach_map: false

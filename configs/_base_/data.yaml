@@ -1,0 +1,22 @@
+data:
+  gopro_root: data/GOPRO_Large
+  realblur_root: data/RealBlur
+  sharp_train: manifests/gopro_sharp_train.txt
+  sharp_val: manifests/gopro_sharp_val.txt
+  sharp_test: manifests/gopro_sharp_test.txt
+  gopro_test_pairs: manifests/gopro_test_pairs.txt
+  realblur_test_pairs: manifests/realblur_j_test_pairs.txt
+  synthetic_root: data/synthetic
+  patch: 256
+  margin: 20
+  noise_sigma: 0.01
+  regions: [1, 2, 3, 4]
+  s_train: [0.0, 0.75]
+  s_ood: [0.75, 1.0]
+  severity_scale: {r_min: 0.0, r_max: 8.0}   # fixed once after EDA, never changed
+  testsets:             # reduced for the 5-day schedule (full design: 100/300/300/150/150)
+    val: {per_region: 50}
+    test_in: {per_region: 100}
+    test_ood: {count: 100}
+    test_straight: {count: 50}
+    test_curved: {count: 50}

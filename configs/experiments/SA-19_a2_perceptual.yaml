@@ -1,0 +1,11 @@
+_base_:
+- ../_base_/data.yaml
+- ../_base_/model.yaml
+- ../_base_/train.yaml
+experiment_id: SA-19
+seed: 1
+model:
+  variant: A2
+loss:
+  lambda_map: 0.1
+  extra_loss: perceptual

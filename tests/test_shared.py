@@ -1,0 +1,71 @@
+import numpy as np
+import torch
+
+from spatial_deblur.data.manifests import assert_disjoint_scenes, split_by_scene
+from spatial_deblur.degradations.blur import blur_nonuniform, blur_uniform
+from spatial_deblur.degradations.kernels import SeverityScale, kernel_for_severity, rasterize, rms_radius
+from spatial_deblur.degradations.masks import soft_masks
+from spatial_deblur.metrics.image_quality import psnr
+from spatial_deblur.metrics.stats import paired_comparison
+from spatial_deblur.models.nafnet import NAFNet
+from spatial_deblur.utils.config import load_config
+
+SCALE = SeverityScale(0.0, 8.0)
+
+
+def test_kernel_sums_to_one_and_severity_tracks_target():
+    rng = np.random.default_rng(0)
+    for s in (0.1, 0.4, 0.7):
+        k, s_meas = kernel_for_severity(rng, s, SCALE)
+        assert abs(k.sum() - 1) < 1e-5
+        assert abs(s_meas - s) < 0.06
+
+
+def test_severity_increases_with_spread():
+    traj = np.stack([np.linspace(-1, 1, 64), np.zeros(64)], 1)
+    radii = [rms_radius(rasterize(traj * a)) for a in (2, 5, 10)]
+    assert radii[0] < radii[1] < radii[2]
+
+
+def test_masks_sum_to_one():
+    m = soft_masks(np.random.default_rng(1), 3, 64, 80)
+    assert m.shape == (3, 64, 80)
+    assert np.allclose(m.sum(0), 1, atol=1e-5) and (m >= 0).all()
+
+
+def test_blur_maps():
+    rng = np.random.default_rng(2)
+    img = rng.random((96, 96, 3)).astype(np.float32)
+    k, s = kernel_for_severity(rng, 0.3, SCALE)
+    u = blur_uniform(img, k, s, 0.0, rng)
+    assert np.allclose(u.severity_map, s)
+    nu = blur_nonuniform(img, rng, SCALE, 3, (0.0, 0.75), 0.01, margin=8)
+    assert nu.blur.shape == (80, 80, 3) and nu.severity_map.shape == (80, 80)
+    assert nu.severity_map.min() >= min(nu.severities) - 1e-5
+    assert nu.severity_map.max() <= max(nu.severities) + 1e-5
+
+
+def test_split_by_scene_is_disjoint():
+    items = [f"train/scene{i // 5}/img{i}.png" for i in range(100)]
+    sel, rest = split_by_scene(items, 0.25, seed=0, depth=2)
+    assert_disjoint_scenes(sel, rest, depth=2)
+    assert len({s.split("/")[1] for s in sel}) == 5
+
+
+def test_psnr_and_stats():
+    a = np.zeros((4, 4, 3), np.float32)
+    assert abs(psnr(a + 0.1, a) - 20.0) < 1e-4
+    r = paired_comparison({"g1": 30.0, "g2": 31.0, "g3": 29.5}, {"g1": 29.0, "g2": 30.5, "g3": 29.0})
+    assert r["mean_diff"] > 0 and r["win_rate"] == 1.0
+
+
+def test_config_inheritance(tmp_path):
+    (tmp_path / "base.yaml").write_text("a: 1\nb: {x: 1, y: 2}\n")
+    (tmp_path / "child.yaml").write_text("_base_: base.yaml\nb: {y: 3}\n")
+    assert load_config(tmp_path / "child.yaml") == {"a": 1, "b": {"x": 1, "y": 3}}
+
+
+def test_nafnet_shapes_and_padding():
+    m = NAFNet(width=8, enc_blk_nums=(1, 1, 1, 1), dec_blk_nums=(1, 1, 1, 1))
+    x = torch.rand(1, 3, 37, 50)
+    assert m(x).shape == x.shape

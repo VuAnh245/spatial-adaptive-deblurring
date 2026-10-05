@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatial-adaptive-deblurring"
+version = "0.1.0"
+description = "Spatially Adaptive Deblurring for Non-Uniform Motion Blur"
+requires-python = ">=3.10"
+authors = [{name = "Vu Xuan Anh"}]
+dependencies = [
+  "torch>=2.1", "numpy>=1.24", "scipy>=1.10", "scikit-image>=0.21", "pillow>=10",
+  "pyyaml>=6", "lpips>=0.1.4", "matplotlib>=3.7", "tqdm", 
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.4", "fvcore", "gdown"]
+demo = ["gradio>=4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120

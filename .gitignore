@@ -1,0 +1,10 @@
+data/
+checkpoints/
+results/
+third_party/*
+!third_party/README.md
+__pycache__/
+*.egg-info/
+.ipynb_checkpoints/
+*.pth
+*.pt

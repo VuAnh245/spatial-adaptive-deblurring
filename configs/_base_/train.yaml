@@ -1,0 +1,18 @@
+training:
+  optimizer: adamw
+  lr: 2.0e-4            # not tuned (time limit); fine-tune lr, official 1e-3 is for training from scratch at batch 32
+  betas: [0.9, 0.9]     # matches official NAFNet-width32 GoPro config
+  weight_decay: 1.0e-3  # matches official NAFNet-width32 GoPro config
+  warmup: 1000
+  min_lr: 1.0e-7
+  iterations: 40000     # adjust after the pilot; identical for every variant
+  batch_size: 8
+  amp: true
+  grad_clip: 1.0
+  ckpt_every: 5000
+  val_every: 5000
+  num_workers: 4
+loss:
+  charbonnier_eps: 1.0e-3
+  lambda_map: 0.0
+hardware: {gpu: null, cuda: null, pytorch: null}   # filled automatically by train.py
