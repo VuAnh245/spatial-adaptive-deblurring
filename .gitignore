@@ -1,6 +1,9 @@
-data/
-checkpoints/
-results/
+# anchored to the repo root: an unanchored "data/" also ignores src/spatial_deblur/data/
+/data/
+/checkpoints/
+/results/
+.pytest_cache/
+.venv/
 third_party/*
 !third_party/README.md
 __pycache__/
