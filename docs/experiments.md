@@ -1,5 +1,20 @@
 # Thí nghiệm (study DL)
 
+## SA-00 Tái lập checkpoint công khai (cổng trước khi train) - ĐẠT
+
+NAFNet-GoPro-width32 công khai, GoPro test 1.111 cặp, ảnh đầy đủ 1280×720, Kaggle T4, torch 2.11.0+cu128,
+commit `827d60a`. Script tương đương: `analysis/reproduce_nafnet_gopro.py`.
+
+| Chỉ số | Kết quả | Công bố |
+| --- | --- | --- |
+| PSNR, uint8, TLC (NAFNetLocal) | **32,870 dB** | 32,87 dB |
+| PSNR, float, TLC | 32,882 dB | |
+| PSNR, uint8, pooling toàn cục (không TLC) | 32,294 dB | |
+| PSNR ảnh nhòe đầu vào | 25,640 dB | |
+| SSIM (tập con 223 ảnh, skimage) | 0,937 | 0,9606 (implementation BasicSR, không so trực tiếp) |
+
+TLC tăng PSNR ở cả 11 chuỗi (+0,02 đến +1,14 dB). Số ảnh mỗi chuỗi không đều (77 đến 134).
+
 | ID | Biến thể | Seed | Mức | Config |
 | --- | --- | --- | --- | --- |
 | SA-10 | A0 | 1 | Lõi | SA-10_a0.yaml |
