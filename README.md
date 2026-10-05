@@ -14,13 +14,15 @@ không giám sát, và tốt hơn việc chỉ thêm tham số không?
 
 ## Biến thể
 
-| ID | Mô tả | Config |
-| --- | --- | --- |
-| A0 | NAFNet-32, không modulation | `configs/experiments/SA-10_a0.yaml` |
-| A0+ | A0 + NAFBlock khởi tạo đồng nhất, số tham số bằng A2 (sai lệch < 2%) | `SA-11_a0plus.yaml` |
-| A1 | Bộ ước lượng + SFT theo không gian, **không** giám sát (lambda_map = 0) | `SA-12_a1.yaml` |
-| A2 | Như A1 + giám sát L_map (model chính) | `SA-13_a2.yaml` |
-| A3 | A2 + nhánh channel | `SA-14_a3.yaml` |
+| ID | Tên đọc được | Mô tả | Config |
+| --- | --- | --- | --- |
+| A0 | NAFNet gốc (Baseline) | NAFNet-32, không modulation | `configs/experiments/SA-10_a0.yaml` |
+| A0+ | NAFNet tăng tham số (Baseline-L) | A0 + NAFBlock khởi tạo đồng nhất, số tham số bằng A2 (sai lệch < 2%) | `SA-11_a0plus.yaml` |
+| A1 | Điều biến tự do (SFT-Free) | Bộ ước lượng + SFT theo không gian, **không** giám sát (lambda_map = 0) | `SA-12_a1.yaml` |
+| A2 | Điều biến theo bản đồ nhòe (SFT-Map), mô hình đề xuất | Như A1 + giám sát L_map | `SA-13_a2.yaml` |
+| A3 | Điều biến theo bản đồ nhòe + kênh (SFT-Map+Ch) | A2 + nhánh channel | `SA-14_a3.yaml` |
+
+Quy ước ký hiệu, mã và tên đọc được: `docs/naming.md`.
 
 Toàn bộ thí nghiệm: `docs/experiments.md`. Đặc tả đầy đủ: tài liệu đặc tả đồ án DL.
 

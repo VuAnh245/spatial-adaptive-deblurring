@@ -33,6 +33,20 @@ def test_masks_sum_to_one():
     assert np.allclose(m.sum(0), 1, atol=1e-5) and (m >= 0).all()
 
 
+def test_masks_non_square_grid_sum_to_one():
+    """QĐ-02: (rows, cols) grids, e.g. 6 x 10 on a full frame, and every training grid size."""
+    rng = np.random.default_rng(3)
+    m = soft_masks(rng, 4, 76, 132, grid=(6, 10))
+    assert m.shape == (4, 76, 132)
+    assert np.allclose(m.sum(0), 1, atol=1e-5) and (m >= 0).all()
+    for g in (3, 4, 5, 6):
+        m = soft_masks(rng, 3, 74, 74, grid=(g, g))
+        assert m.shape == (3, 74, 74) and np.allclose(m.sum(0), 1, atol=1e-5)
+    img = rng.random((60, 90, 3)).astype(np.float32)
+    nu = blur_nonuniform(img, rng, SCALE, 3, (0.0, 0.75), 0.01, margin=8, grid=(2, 3))
+    assert nu.blur.shape == (44, 74, 3) and np.allclose(nu.masks.sum(0), 1, atol=1e-5)
+
+
 def test_blur_maps():
     rng = np.random.default_rng(2)
     img = rng.random((96, 96, 3)).astype(np.float32)

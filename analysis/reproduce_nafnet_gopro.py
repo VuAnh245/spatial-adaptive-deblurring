@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
+import socket
 import subprocess
 import time
 from collections import defaultdict
@@ -85,7 +87,8 @@ def main() -> None:
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
-    (out / "meta.txt").write_text(f"commit {commit}\ngpu {gpu}\ntorch {torch.__version__}\n")
+    (out / "meta.txt").write_text(f"commit {commit}\ngpu {gpu}\ntorch {torch.__version__}\n"
+                                  f"account {os.environ.get('RUN_ACCOUNT', 'unknown')}\nhost {socket.gethostname()}\n")
     csv_path = out / ("gopro_test_nafnet32_public.csv" if not a.limit else f"smoke_{a.limit}.csv")
 
     rows, t0 = [], time.time()

@@ -1,4 +1,4 @@
-# Kiến trúc A2
+# Kiến trúc SFT-Map (A2)
 
 ```text
 B ──► Blur-map estimator ──► Ŝ (1/4 res) ──► SFT head mỗi stage ──► Δγ_s, β_s

@@ -57,10 +57,12 @@ class SpatialSFTHead(nn.Module):
 class ChannelModulation(nn.Module):
     def __init__(self, channels: int, reduction: int = 4):
         super().__init__()
-        self.fc1 = nn.Linear(channels, max(channels // reduction, 8))
-        self.fc2 = _zero(nn.Linear(max(channels // reduction, 8), 2 * channels))
+        # A module (not tensor.mean) so models.tlc.convert_tlc localises it like NAFNet's SCA pooling.
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.Conv2d(channels, max(channels // reduction, 8), 1)
+        self.fc2 = _zero(nn.Conv2d(max(channels // reduction, 8), 2 * channels, 1))
 
     def forward(self, feat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        z = feat.mean(dim=(2, 3))
-        dg, b = self.fc2(F.gelu(self.fc1(z))).chunk(2, dim=1)
-        return dg[..., None, None], b[..., None, None]
+        # 1x1 convs = per-position MLP, so the branch also works on a local (TLC) pooled map.
+        dg, b = self.fc2(F.gelu(self.fc1(self.pool(feat)))).chunk(2, dim=1)
+        return dg, b

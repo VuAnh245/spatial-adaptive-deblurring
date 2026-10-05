@@ -2,7 +2,7 @@
 
 Shared infrastructure.
 - Non-blind (known kernel): Wiener and Richardson-Lucy, parameters chosen on val.
-- Blind (CV study, M1): straight-line motion PSF whose length and angle are
+- Blind ("phương pháp của đồ án CV"): straight-line motion PSF whose length and angle are
   grid-searched on a validation set by maximising a no-reference sharpness
   score with a ringing penalty, then Richardson-Lucy.
 """

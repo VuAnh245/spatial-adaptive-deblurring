@@ -39,3 +39,24 @@ def map_quality(s_hat: torch.Tensor, smap: torch.Tensor, max_pixels: int = 200_0
 def heterogeneity(smap: np.ndarray) -> float:
     """H = std(S) over the image (bins chosen after EDA)."""
     return float(np.std(smap))
+
+
+def make_train_diag():
+    """Training diagnostics for Trainer(diag_fn=...), logged every ``diag_every`` steps to diag.jsonl:
+    ||W|| of every SFT head's last conv (zero at init: shows whether the heads leave zero at all),
+    mean |delta_gamma_s| and |beta_s| per stage on that step's batch. L_map comes in separately
+    through the loss parts. Variants without SFT heads (Baseline, Baseline-L) log nothing here."""
+    def diag(model, phase: str):
+        if getattr(model, "sft", None) is None:
+            return None
+        if phase == "begin":
+            model.mod_stats = {}
+            return None
+        stats, model.mod_stats = model.mod_stats or {}, None
+        row = {}
+        for key, head in model.sft.items():
+            row[f"w_sft_{key}"] = float(head.conv2.weight.detach().norm())
+            if key in stats:
+                row[f"dgamma_{key}"], row[f"beta_{key}"] = stats[key]
+        return row
+    return diag

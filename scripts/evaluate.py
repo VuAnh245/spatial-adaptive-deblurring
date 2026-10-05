@@ -18,6 +18,7 @@ import torch
 
 from spatial_deblur.data.datasets import FixedSyntheticDataset, PairedImageDataset
 from spatial_deblur.metrics.image_quality import local_psnr, psnr, ssim
+from spatial_deblur.models.tlc import convert_tlc
 from spatial_deblur.modulation.analysis import heterogeneity, map_quality, predict
 from spatial_deblur.modulation.variants import build_variant
 from spatial_deblur.utils.config import load_config
@@ -30,12 +31,14 @@ def main() -> None:
     ap.add_argument("--split", default="test_in")
     ap.add_argument("--mode", default="pred", choices=["pred", "oracle", "shuffle"])
     ap.add_argument("--classical", action="store_true")
+    ap.add_argument("--pool", default="tlc", choices=["tlc", "global"],
+                    help="tlc = primary protocol (docs/experiments.md); global = appendix, A0/A2 only")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
     cfg = load_config(a.config)
     m, d = cfg["model"], cfg["data"]
-    out = Path(a.out or f"results/{cfg['experiment_id']}_eval_{a.split}_{a.mode}.csv")
+    out = Path(a.out or f"results/{cfg['experiment_id']}_eval_{a.split}_{a.mode}_{a.pool}.csv")
 
     if a.split == "gopro_test":
         ds = PairedImageDataset(d["gopro_root"], d["gopro_test_pairs"], patch=None, train=False)
@@ -48,6 +51,9 @@ def main() -> None:
     kw = {k: m[k] for k in ("width", "middle_blk_num", "enc_blk_nums", "dec_blk_nums")}
     model = build_variant(m["variant"], kw)
     model.load_state_dict(torch.load(a.ckpt, map_location="cpu"))
+    model = model.eval()
+    if a.pool == "tlc":
+        convert_tlc(model, train_size=d["patch"])
     model = model.to(a.device).eval()
 
     rows = []

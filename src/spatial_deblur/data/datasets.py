@@ -68,12 +68,14 @@ class SyntheticNonUniformDataset(Dataset):
 
     def __init__(self, root: str | Path, sharp_manifest: str | Path, scale: SeverityScale,
                  s_range=(0.0, 0.75), regions=(1, 2, 3, 4), patch: int = 256, margin: int = 20,
-                 noise_sigma: float = 0.01, length: int = 100_000, seed: int = 0):
+                 noise_sigma: float = 0.01, length: int = 100_000, seed: int = 0,
+                 mask_grids=(3, 4, 5, 6)):
         self.root = Path(root)
         self.frames = read_list(sharp_manifest)
         self.scale, self.s_range, self.regions = scale, tuple(s_range), tuple(regions)
         self.patch, self.margin, self.noise_sigma, self.length = patch, margin, noise_sigma, length
         self.seed = seed
+        self.mask_grids = tuple(mask_grids)  # QĐ-02: multi-scale square cells on the training patch
 
     def __len__(self) -> int:
         return self.length
@@ -86,7 +88,9 @@ class SyntheticNonUniformDataset(Dataset):
         y, x = int(rng.integers(0, h - big + 1)), int(rng.integers(0, w - big + 1))
         crop = img[y:y + big, x:x + big]
         r = int(rng.choice(self.regions))
-        sample = blur_nonuniform(crop, rng, self.scale, r, self.s_range, self.noise_sigma, margin=self.margin)
+        g = int(rng.choice(self.mask_grids))
+        sample = blur_nonuniform(crop, rng, self.scale, r, self.s_range, self.noise_sigma, margin=self.margin,
+                                 grid=(g, g))
         sharp = crop[self.margin:-self.margin, self.margin:-self.margin]
         b, s, m = augment([sample.blur, sharp, sample.severity_map], rng)
         return {"blur": to_tensor(b), "sharp": to_tensor(s), "smap": to_tensor(m), "regions": r}

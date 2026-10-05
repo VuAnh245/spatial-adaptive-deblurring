@@ -8,6 +8,7 @@ import argparse
 import json
 
 from spatial_deblur.metrics.efficiency import count_params, latency, macs
+from spatial_deblur.utils.labels import UNITS, model_label, model_name
 
 
 def build(name: str):
@@ -26,7 +27,7 @@ def main() -> None:
     ap.add_argument("--width", type=int, default=1280)
     a = ap.parse_args()
     m = build(a.model)
-    report = {"model": a.model, **count_params(m), "macs_G_256": macs(m), "macs_tool": "fvcore",
+    report = {"model": a.model, "label": model_label(a.model), "name": model_name(a.model), "units": UNITS, **count_params(m), "macs_G_256": macs(m), "macs_tool": "fvcore",
               **latency(m, a.height, a.width, device=a.device)}
     print(json.dumps(report, indent=2))
 

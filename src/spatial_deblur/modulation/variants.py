@@ -36,10 +36,13 @@ class ModulatedNAFNet(NAFNet):
         self.sft = nn.ModuleDict({k: SpatialSFTHead(c) for k, c in stages.items()}) if spatial else None
         self.chan = nn.ModuleDict({k: ChannelModulation(c) for k, c in stages.items()}) if channel else None
         self._smap: torch.Tensor | None = None
+        self.mod_stats: dict | None = None  # filled by run_stage when a dict is set (training diagnostics)
 
     def run_stage(self, blocks, x, stage, idx):
         key = f"{stage}{idx}"
         sft = self.sft[key](self._smap, x.shape[-2:]) if self.spatial else None
+        if self.mod_stats is not None and sft is not None:
+            self.mod_stats[key] = (sft[0].detach().abs().mean().item(), sft[1].detach().abs().mean().item())
         for blk in blocks:
             def modulate(xn, inp, sft=sft, key=key):
                 gamma, bias = 1.0, 0.0

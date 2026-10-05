@@ -24,10 +24,14 @@ def make_loss(lambda_map: float = 0.1):
         l_rec = charbonnier(pred, batch["sharp"])
         parts = {"charbonnier": l_rec.detach()}
         loss = l_rec
-        if s_hat is not None and lambda_map > 0:
+        if s_hat is not None and "smap" in batch:
+            # L_map is always logged; it only enters the loss when lambda_map > 0
+            # (for SFT-Free it shows whether the free map drifts towards S at all).
             target = F.interpolate(batch["smap"], size=s_hat.shape[-2:], mode="area")
-            l_map = F.smooth_l1_loss(s_hat, target)
-            loss = loss + lambda_map * l_map
+            l_map = F.smooth_l1_loss(s_hat.float(), target.float())
+            if lambda_map > 0:
+                loss = loss + lambda_map * l_map
             parts["l_map"] = l_map.detach()
+        parts["loss"] = loss.detach()
         return loss, parts
     return loss_fn

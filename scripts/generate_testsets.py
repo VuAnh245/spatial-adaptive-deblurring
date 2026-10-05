@@ -10,6 +10,7 @@ source sequence (group) used for grouped statistics.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from pathlib import Path
 
 import numpy as np
@@ -21,10 +22,10 @@ from spatial_deblur.degradations.kernels import SeverityScale
 from spatial_deblur.utils.config import load_config
 
 
-def make(img, rng, scale, r, s_range, noise, targets=None, curvature=None, jitter=None, margin=20):
+def make(img, rng, scale, r, s_range, noise, targets=None, curvature=None, jitter=None, margin=20, grid=(6, 10)):
     padded = np.pad(img, ((margin, margin), (margin, margin), (0, 0)), mode="reflect")
     return blur_nonuniform(padded, rng, scale, r, s_range, noise, margin=margin, targets=targets,
-                           curvature=curvature, jitter=jitter)
+                           curvature=curvature, jitter=jitter, grid=grid)
 
 
 def main() -> None:
@@ -32,6 +33,8 @@ def main() -> None:
     ap.add_argument("--config", required=True)
     ap.add_argument("--noise-mult", type=float, default=1.0)
     ap.add_argument("--seed", type=int, default=12345)
+    ap.add_argument("--splits", nargs="*", default=None,
+                    help="generate only these splits (e.g. val); seeds stay those of the full run")
     a = ap.parse_args()
     cfg = load_config(a.config)
     d = cfg["data"]
@@ -51,6 +54,9 @@ def main() -> None:
     for si, (split, (pool, groups, kind)) in enumerate(plans.items()):
         if a.noise_mult != 1 and split == "val":
             continue
+        if a.splits and split not in a.splits:
+            continue  # the split index si is kept, so a split is identical whether generated alone or not
+        digest = hashlib.sha256()
         folder = out_root / (split + suffix)
         folder.mkdir(parents=True, exist_ok=True)
         idx = 0
@@ -69,7 +75,9 @@ def main() -> None:
                     kw.update(curvature=0.0, jitter=0.0)
                 elif kind == "curved":
                     kw.update(curvature=0.5)
-                s = make(img, rng, scale, rr, (lo, hi), noise, **kw)
+                s = make(img, rng, scale, rr, (lo, hi), noise, grid=tuple(d["mask_grid_test"]), **kw)
+                digest.update(np.ascontiguousarray(s.blur).tobytes())
+                digest.update(np.ascontiguousarray(s.severity_map).tobytes())
                 np.savez_compressed(folder / f"{idx:05d}.npz", blur=s.blur, sharp=img, smap=s.severity_map,
                                     regions=rr, severities=np.array(s.severities), kernels=np.stack(s.kernels),
                                     group=Path(pool[p]).parts[1],
@@ -77,7 +85,7 @@ def main() -> None:
                 idx += 1
         files = sorted(str(f) for f in folder.glob("*.npz"))
         write_list(f"manifests/synthetic_{split}{suffix}.txt", files)
-        print(f"{split}{suffix}: {idx} images")
+        print(f"{split}{suffix}: {idx} images, content sha256 {digest.hexdigest()[:16]}", flush=True)
 
 
 if __name__ == "__main__":

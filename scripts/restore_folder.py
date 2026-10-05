@@ -1,8 +1,11 @@
-"""Restore a folder with a trained variant (used to produce M5 outputs for the CV study).
+"""Restore a folder with a trained variant. Used by the CV study, where SFT-Map (SA-13) is
+one of the compared restorers ("phương pháp của đồ án CV").
 
     python scripts/restore_folder.py --config configs/experiments/SA-13_a2.yaml --ckpt results/SA-13_a2_seed1/final.pth \
-        --input ../deblurring-for-detection/data/coco_blur/D2_moderate \
-        --output ../deblurring-for-detection/results/restored/M5/D2_moderate
+        --input ../deblurring-for-detection/data/coco_blur/<blurred set> \
+        --output ../deblurring-for-detection/results/restored/<CV method folder>/<blurred set>
+
+Folder names on the CV side follow that repository's own convention.
 """
 from __future__ import annotations
 

@@ -17,7 +17,8 @@ from spatial_deblur.data.manifests import assert_disjoint_scenes, write_list
 
 
 def frames(root: Path, split: str, kind: str) -> list[str]:
-    return sorted(str(p.relative_to(root)) for p in (root / split).glob(f"*/{kind}/*.png"))
+    # as_posix: manifests must use "/" on every OS (pair building and scene ids split on it)
+    return sorted(p.relative_to(root).as_posix() for p in (root / split).glob(f"*/{kind}/*.png"))
 
 
 def main() -> None:

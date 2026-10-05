@@ -11,7 +11,8 @@ training:
   grad_clip: 1.0
   ckpt_every: 5000
   val_every: 5000
-  num_workers: 4
+  diag_every: 500       # ||W|| of SFT last convs, mean |dgamma_s|, |beta_s| per stage -> diag.jsonl
+  num_workers: 2        # two runs share one Kaggle T4 x2 session (4 vCPU): 2 loader workers each
 loss:
   charbonnier_eps: 1.0e-3
   lambda_map: 0.0

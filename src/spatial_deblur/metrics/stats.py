@@ -39,7 +39,8 @@ def paired_comparison(a: dict[str, float], b: dict[str, float], n_boot: int = 10
 
 
 def verdict(result: dict[str, float], min_effect: float = 0.1, alpha: float = 0.05) -> str:
-    """Wording rule from the spec: small and non-significant means 'no difference'."""
+    """Wording rule from the spec: small and non-significant means 'no difference'.
+    Returns an ID ('first_better' / 'second_better' / 'no_difference'); labels are added by the caller."""
     if result["wilcoxon_p"] >= alpha and abs(result["mean_diff"]) < min_effect:
-        return "no difference"
-    return "A better" if result["mean_diff"] > 0 else "B better"
+        return "no_difference"
+    return "first_better" if result["mean_diff"] > 0 else "second_better"

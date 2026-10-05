@@ -1,4 +1,4 @@
-"""Apply uniform (D1) and region-mixed non-uniform (D2) motion blur.
+"""Apply uniform motion blur ("nhòe đồng nhất") and region-mixed motion blur ("nhòe không đồng nhất").
 
 Shared infrastructure. Images are float32 HxWx3 in [0, 1] (sRGB).
 
@@ -44,7 +44,7 @@ def blur_nonuniform(image: np.ndarray, rng: np.random.Generator, scale: Severity
                     n_regions: int, s_range: tuple[float, float], noise_sigma: float = 0.01,
                     temperature: float | None = None, margin: int = 20,
                     targets: list[float] | None = None, curvature: float | None = None,
-                    jitter: float | None = None) -> BlurSample:
+                    jitter: float | None = None, grid: int | tuple[int, int] = 6) -> BlurSample:
     """Region-mixed blur. ``image`` should already include ``margin`` pixels
     of context on each side; the returned sample is cropped back.
 
@@ -52,7 +52,7 @@ def blur_nonuniform(image: np.ndarray, rng: np.random.Generator, scale: Severity
     (e.g. the out-of-distribution split forces one region above 0.75).
     """
     h, w = image.shape[:2]
-    masks = soft_masks(rng, n_regions, h, w, temperature=temperature)
+    masks = soft_masks(rng, n_regions, h, w, grid=grid, temperature=temperature)
     if targets is None:
         targets = [rng.uniform(*s_range) for _ in range(n_regions)]
     kernels, sev = [], []
