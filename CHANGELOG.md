@@ -26,8 +26,8 @@ Shared modules (`src/spatial_deblur/{data,degradations,models,classical,engine,m
 - `data/manifests`: `video_of`, and `split_by_scene` / `assert_disjoint_scenes(level="video")` (default) check
   splits at source-video level (clips `GOPRxxxx_yy_NN` merged). `build_manifests.py` picks val from videos with a
   single clip in train and none in test. Val changed: old sequences GOPR0374_11_00 + GOPR0386_11_00
-  (GOPR0374_11 had 3 more clips in train), content sha256 `5350747d6c56f2b6`; new val sha256: (fill in after
-  the first generation on Kaggle).
+  (GOPR0374_11 had 3 more clips in train), content sha256 `5350747d6c56f2b6`; new val GOPR0379_11_00 +
+  GOPR0857_11_00, content sha256 `96ca0c00be35f399` (commit ae167ee, Kaggle 2026-10-06).
 - `scripts/compare.py --group-by video` (default, QĐ-05) and `win_rate_images`.
 - `models/nafnet.LayerNorm2d`: statistics in FP32 inside autocast (FP16 (x - mu)^2 overflows above ~256);
   identical in FP32, so SA-00 is unaffected.
@@ -37,6 +37,11 @@ Shared modules (`src/spatial_deblur/{data,degradations,models,classical,engine,m
   Floor guard `Trainer(val_floor_drop=...)`: a val pass below the step-0 val minus the margin (or non-finite) stops
   the run (`aborted_val_drop`, `abort_reason='val_drop'`, last.pth not overwritten; train.py exits 4); the step-0
   baseline is re-read from val.jsonl on resume; the final step is validated before its checkpoint.
+  `Trainer(grad_accum=...)`: one optimizer step over several micro-batches (loss / grad_accum).
+  Stall guard: grad_norm = 0 at `max_zero_grad_logs` (3) consecutive log rows -> `aborted_stalled`;
+  enabled GradScaler with scale < 1 -> `aborted_amp_scale`. train.py exit codes 3 / 4 / 5 / 6.
+- Study config: `amp: false` (QĐ-07, FP32 after AMP numeric failures in pilots 2 and 3), `grad_accum: 1`.
+  SA-15 redefined as "SFT-Map chỉ ở decoder" (middle block beta ~0.0036 in the public checkpoint).
 - Study code: `modulation/analysis.val_metrics` (val pass used by train.py, tested); diag adds middle-block |beta|.
   Training lr 2e-4 -> 1e-4 after pilot 2 diverged at the peak lr (QĐ-04).
 - Study code (not shared): Baseline-L param matching QĐ-06 (2 blocks at dec1 instead of 28 at dec3);

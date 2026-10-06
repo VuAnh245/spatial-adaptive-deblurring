@@ -55,7 +55,7 @@ làm tròn 2 chữ số. Nhóm "H bằng 0" gồm các ảnh R = 1.
 
 Phương án "Một ITERS cho mọi mô hình, gói vừa một phiên":
 (1) công thức giống nhau cho Baseline, Baseline-L, SFT-Free, SFT-Map, SFT-Map+Ch: AdamW lr 1e-4 (ban đầu 2e-4, hạ theo (3)), betas (0,9; 0,9),
-    weight decay 1e-3, batch 8, patch 256, warmup 1000 iter rồi cosine về 1e-7, AMP FP16, gradient clip 1,0,
+    weight decay 1e-3, batch 8, patch 256, warmup 1000 iter rồi cosine về 1e-7, FP32 (QĐ-07; ban đầu AMP FP16), gradient clip 1,0,
     2 worker DataLoader mỗi tiến trình (hai run chạy chung một phiên T4 × 2);
 (2) ITERS tính theo mô hình chậm nhất đo được ở pilot (pilot chạy SFT-Map và Baseline-L song song;
     SFT-Free có cùng kiến trúc với SFT-Map, Baseline nhẹ nhất), sao cho một phiên Kaggle 12 giờ chứa đủ
@@ -85,7 +85,30 @@ Diễn biến (2026-10-06):
     dụng chung cho mọi biến thể. Checkpoint ở bước có val chỉ được ghi sau khi val đó qua sàn (ckpt_every là bội của val_every),
     và bước cuối luôn được val trước khi ghi.
 
-ITERS = (khóa sau pilot lần ba) | VAL_EVERY = 2500 | CKPT_EVERY = 2500
+(6) pilot lần ba (lr 1e-4, AMP): FAIL. GradScaler sụp (scale về gần 0 sau một chuỗi gradient inf), gradient bị làm tròn
+    về 0 và cả hai run ngừng học từ khoảng bước 600 (SFT-Map) và 200 (Baseline-L): val bước 750 → 1500 chỉ đổi
+    +0,0007 / +0,0004 dB. Phép kiểm tra lr ở mức đỉnh vì vậy chưa thực hiện được. Dẫn tới QĐ-07;
+(7) pilot lần bốn: FP32 (QĐ-07), lr 1e-4, 1500 iter, val ở 0 / 750 / 1500, SFT-Map và Baseline-L song song;
+    đo lại bộ nhớ đỉnh, it/s và ITERS.
+
+ITERS = (khóa sau pilot lần bốn) | VAL_EVERY = 2500 | CKPT_EVERY = 2500
+
+## QĐ-07 Độ chính xác số khi train (chốt 2026-10-06)
+
+Phương án "FP32 toàn phần" (`amp: false` cho mọi biến thể); loại phương án "AMP + dò lỗi". Lý do:
+(1) ba pilot liên tiếp gặp sự cố số học dưới AMP: phân kỳ và NaN ở pilot lần hai, GradScaler sụp ở pilot lần ba;
+    sửa LayerNorm2d sang FP32 không chặn được gốc rễ, và op sinh inf trong backward chưa xác định được;
+(2) repo NAFNet gốc train bằng FP32;
+(3) nút thắt là CPU sinh dữ liệu (GPU chờ dữ liệu khoảng 45% thời gian), nên một phần chi phí FP32 được che đi.
+Nếu FP32 hết bộ nhớ ở batch 8: tích lũy gradient, micro-batch 4 × 2 (`grad_accum: 2`), batch hiệu dụng vẫn là 8,
+ghi rõ trong config của run. ITERS đo lại ở pilot lần bốn.
+
+Chốt chặn dừng run (ghi trong `events.jsonl`, không ghi đè `last.pth`), mã thoát của `train.py`:
+(1) loss không hữu hạn hơn 50 bước liên tiếp: `aborted_nonfinite`, mã 3;
+(2) val thấp hơn val ở bước 0 quá 1 dB hoặc không hữu hạn: `aborted_val_drop`, mã 4;
+(3) `grad_norm` bằng 0 ở 3 lần log liên tiếp: `aborted_stalled`, mã 5 (không phụ thuộc AMP);
+(4) GradScaler bật mà scale < 1: `aborted_amp_scale`, mã 6 (không hoạt động khi FP32).
+Val đóng băng sau warmup chỉ được kiểm trong `pilot_report.py`, không làm dừng run, để tránh dừng nhầm ở cuối cosine khi lr rất nhỏ.
 
 ## QĐ-05 Đơn vị gộp khi kiểm định (chốt 2026-10-06, trước mọi đánh giá)
 
@@ -134,7 +157,7 @@ Cảnh báo cần dừng phân tích: `w_sft_*` của SFT-Free hoặc SFT-Map đ
 | SA-12 | Huấn luyện SFT-Free | A1 | 3 | Lõi | SA-12_a1.yaml |
 | SA-13 | Huấn luyện SFT-Map (mô hình đề xuất) | A2 | 3 | Lõi | SA-13_a2.yaml |
 | SA-14 | Huấn luyện SFT-Map+Ch | A3 | 1 | Lõi | SA-14_a3.yaml |
-| SA-15 | SFT-Map chỉ ở middle | A2 | 1 | Tùy chọn | SA-15_a2_mid_only.yaml |
+| SA-15 | SFT-Map chỉ ở decoder (thay "chỉ ở middle": stage middle gần như bị tắt trong checkpoint) | A2 | 1 | Tùy chọn | SA-15_a2_mid_only.yaml (giữ tên file) |
 | SA-16 | SFT-Map ở encoder + middle | A2 | 1 | Tùy chọn | SA-16_a2_enc_mid.yaml |
 | SA-17 | SFT-Map cắt gradient vào bộ ước lượng | A2 | 1 | Tùy chọn | SA-17_a2_detach.yaml |
 | SA-18 | SFT-Map + loss FFT | A2 | 1 | Tùy chọn | SA-18_a2_fft.yaml |

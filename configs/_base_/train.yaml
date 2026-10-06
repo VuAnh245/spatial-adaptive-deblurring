@@ -6,8 +6,9 @@ training:
   warmup: 1000
   min_lr: 1.0e-7
   iterations: 40000     # adjust after the pilot; identical for every variant
-  batch_size: 8
-  amp: true
+  batch_size: 8         # effective batch per optimizer step
+  grad_accum: 1         # QĐ-07: if FP32 runs out of memory at batch 8, set 2 (micro-batch 4 x 2), same effective batch
+  amp: false            # QĐ-07 "FP32 toàn phần": 3 pilots in a row had AMP numeric failures; NAFNet trains in FP32
   grad_clip: 1.0
   ckpt_every: 5000
   val_every: 5000

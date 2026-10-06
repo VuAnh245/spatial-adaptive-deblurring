@@ -35,6 +35,8 @@ def main() -> None:
     ap.add_argument("--val-every", type=int, default=2500)
     ap.add_argument("--ckpt-every", type=int, default=2500)
     ap.add_argument("--max-drop-db", type=float, default=0.3)
+    ap.add_argument("--warmup", type=int, default=1000, help="val freezing is only checked after the warmup")
+    ap.add_argument("--freeze-db", type=float, default=0.01, help="|val change| below this after warmup = frozen")
     a = ap.parse_args()
 
     speeds, val_secs, ckpt_secs, startups, step0, failures = [], [], [], [], {}, []
@@ -43,11 +45,13 @@ def main() -> None:
         print(f"\n=== {run.name} ===")
         start = next((e for e in ev if e["event"] == "start"), {})
         if start:
-            print(f"lr {start.get('lr')} | batch {start.get('batch_size')} | workers {start.get('num_workers')} | "
+            print(f"lr {start.get('lr')} | batch {start.get('batch_size')} x accum {start.get('grad_accum', 1)} | "
+                  f"amp {start.get('amp')} | workers {start.get('num_workers')} | "
                   f"account {start.get('account')} | host {start.get('host')} | startup {start.get('startup_sec')} s")
             startups.append(start.get("startup_sec", 0.0))
         ckpt_secs += [e["ckpt_sec"] for e in ev if e["event"] == "ckpt"]
-        bad_events = [e for e in ev if e["event"] in ("aborted_nonfinite", "ckpt_skipped_nonfinite", "aborted_val_drop")]
+        bad_events = [e for e in ev if e["event"] in ("aborted_nonfinite", "ckpt_skipped_nonfinite", "aborted_val_drop",
+                                                       "aborted_stalled", "aborted_amp_scale")]
         if bad_events:
             failures.append(f"{run.name}: events {[(e['event'], e['step']) for e in bad_events]}")
         if len(cur) >= 2:
@@ -59,8 +63,16 @@ def main() -> None:
             print("last loss parts: " + ", ".join(f"{k}={last[k]:.4f}" for k in ("charbonnier", "l_map", "loss") if k in last))
             if "grad_norm" in last:
                 print("grad_norm by step: " + ", ".join(f"{r['step']}:{r['grad_norm']:.3g}" for r in cur))
-                print(f"amp_scale min {min(r['amp_scale'] for r in cur):.0f} | "
-                      f"max nonfinite_run {max(r.get('nonfinite_run', 0) for r in cur)}")
+                scale_min = min(r["amp_scale"] for r in cur)
+                print(f"amp_scale min {scale_min:.3g} | max nonfinite_run {max(r.get('nonfinite_run', 0) for r in cur)}")
+                if start.get("amp", True) and scale_min < 1.0:  # pilot 3: the scale collapsed towards 0
+                    failures.append(f"{run.name}: amp_scale collapsed to {scale_min:.3g}")
+                zero_run = best = 0
+                for r in cur:
+                    zero_run = zero_run + 1 if r["grad_norm"] == 0 else 0
+                    best = max(best, zero_run)
+                if best >= 2:
+                    failures.append(f"{run.name}: grad_norm = 0 in {best} consecutive log rows (training stalled)")
             bad = [r["step"] for r in cur if not all(math.isfinite(r[k]) for k in ("charbonnier", "loss") if k in r)]
             if bad:
                 failures.append(f"{run.name}: non-finite training loss from step {bad[0]}")
@@ -84,6 +96,11 @@ def main() -> None:
             else:
                 msg = "within limit, keep lr"
             print(f"val PSNR step 0 -> {val[-1]['step']}: {v0['val_psnr']:.3f} -> {end:.3f} | {msg}")
+        if len(val) >= 2 and val[-1]["step"] > a.warmup and math.isfinite(val[-1]["val_psnr"]):
+            change = abs(val[-1]["val_psnr"] - val[-2]["val_psnr"])
+            if change < a.freeze_db:  # report-only check: the trainer does not stop on this
+                failures.append(f"{run.name}: val frozen after warmup ({val[-2]['step']} -> {val[-1]['step']}: "
+                                f"{change:.4f} dB < {a.freeze_db})")
         if diag:
             d = diag[-1]
             stages = [k[len("w_sft_"):] for k in d if k.startswith("w_sft_")]

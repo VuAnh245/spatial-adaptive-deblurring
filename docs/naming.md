@@ -63,7 +63,7 @@ Ngoại lệ duy nhất: trích nguyên nhãn hình của bài báo khác, ví d
 | SA-12 | Huấn luyện SFT-Free |
 | SA-13 | Huấn luyện SFT-Map |
 | SA-14 | Huấn luyện SFT-Map+Ch |
-| SA-15 | SFT-Map chỉ ở middle |
+| SA-15 | SFT-Map chỉ ở decoder (thay "chỉ ở middle" ngày 2026-10-06, xem `docs/architecture.md`) |
 | SA-16 | SFT-Map ở encoder + middle |
 | SA-17 | SFT-Map cắt gradient vào bộ ước lượng |
 | SA-18 | SFT-Map + loss FFT |
@@ -147,9 +147,10 @@ Số thập phân trong hình dùng dấu phẩy (0,45). Kết luận của `scr
 | QĐ-01 | Giao thức đánh giá | "TLC chính, global phụ" | Đã chốt 2026-10-05 (`docs/experiments.md`) |
 | QĐ-02 | Thang vùng nhòe train và test | Chọn "Ô vuông + đa thang" (loại "Giữ lưới cũ") | Đã chốt 2026-10-05, trước Bước 5 (`docs/experiments.md`). Số EDA chỉ để xác nhận và ghi vào báo cáo |
 | QĐ-03 | Ngưỡng nhóm H | "Theo phân vị 33/67" trên H của các mẫu R ≥ 2 (500 mẫu EDA, làm tròn 2 chữ số); nhóm "H bằng 0" gồm các ảnh R = 1 | Quy tắc đã chốt, chờ số EDA rồi ghi vào config trước Bước 5 |
-| QĐ-04 | Công thức huấn luyện và số iteration chung | "Một ITERS cho mọi mô hình, gói vừa một phiên" (batch 8; lr hạ từ 2e-4 xuống 1e-4 sau khi pilot lần hai phân kỳ) | Quy tắc đã chốt, ITERS khóa sau pilot lần ba (`docs/experiments.md`) |
+| QĐ-04 | Công thức huấn luyện và số iteration chung | "Một ITERS cho mọi mô hình, gói vừa một phiên" (batch 8; lr hạ từ 2e-4 xuống 1e-4 sau khi pilot lần hai phân kỳ) | Quy tắc đã chốt, ITERS khóa sau pilot lần bốn (`docs/experiments.md`) |
 | QĐ-05 | Đơn vị gộp khi kiểm định | "Gộp theo video" (10 nhóm trên GoPro test), báo kèm tỉ lệ thắng theo ảnh | Đã chốt 2026-10-06 |
 | QĐ-06 | Quy tắc khớp tham số của Baseline-L | "Ít block nhất, lệch ≤ 5% phần thêm" (2 block ở dec1, 17.349.731 tham số); loại "Khớp tuyệt đối", "Một block ở dec0" | Đã chốt 2026-10-06 |
+| QĐ-07 | Độ chính xác số khi train | "FP32 toàn phần" (loại "AMP + dò lỗi"); nếu hết bộ nhớ thì tích lũy gradient 4 × 2 | Đã chốt 2026-10-06 |
 | CH-01 | Gradient của SFT head khi lớp cuối khởi tạo 0 | | Nội dung đúng, chờ câu trả lời bằng lời của sinh viên qua CH-03 |
 | CH-02 | Vì sao TLC chỉ có tác dụng khi ảnh test lớn hơn patch train | | Đạt |
 | CH-03 | Nếu `sft.*.conv2` của SFT-Free vẫn gần 0 sau 10k iter thì đường val so với Baseline thế nào, và có kết luận được gì | | Chờ trả lời |

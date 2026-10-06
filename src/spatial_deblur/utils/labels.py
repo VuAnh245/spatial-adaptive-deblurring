@@ -26,7 +26,7 @@ EXPERIMENT_LABELS = {
     "SA-00": "Tái lập NAFNet gốc trên GoPro",
     "SA-10": "Huấn luyện Baseline", "SA-11": "Huấn luyện Baseline-L", "SA-12": "Huấn luyện SFT-Free",
     "SA-13": "Huấn luyện SFT-Map", "SA-14": "Huấn luyện SFT-Map+Ch",
-    "SA-15": "SFT-Map chỉ ở middle", "SA-16": "SFT-Map ở encoder + middle",
+    "SA-15": "SFT-Map chỉ ở decoder", "SA-16": "SFT-Map ở encoder + middle",
     "SA-17": "SFT-Map cắt gradient vào bộ ước lượng", "SA-18": "SFT-Map + loss FFT",
     "SA-19": "SFT-Map + loss perceptual",
     "SA-20": "Trần bản đồ thật", "SA-21": "Phép thử xáo trộn", "SA-22": "Chất lượng bản đồ ước lượng",

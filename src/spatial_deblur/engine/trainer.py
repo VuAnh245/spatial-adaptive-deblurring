@@ -38,7 +38,8 @@ class Trainer:
                  val_every: int = 5000, device: str = "cuda",
                  diag_fn: Callable[[torch.nn.Module, str], dict | None] | None = None, diag_every: int = 500,
                  val_at_start: bool = False, max_nonfinite: int = 50,
-                 val_floor_drop: float | None = None, val_floor_key: str = "val_psnr"):
+                 val_floor_drop: float | None = None, val_floor_key: str = "val_psnr",
+                 grad_accum: int = 1, max_zero_grad_logs: int = 3):
         self.model = model.to(device)
         self.loss_fn, self.loader, self.val_fn = loss_fn, train_loader, val_fn
         self.out = Path(out_dir)
@@ -68,6 +69,8 @@ class Trainer:
         self.val_floor_drop, self.val_floor_key = val_floor_drop, val_floor_key
         self.val_baseline: float | None = None
         self._val_failed = False
+        self.grad_accum = max(1, int(grad_accum))  # micro-batches per optimizer step (loader yields micro-batches)
+        self.max_zero_grad_logs = max_zero_grad_logs
 
     # ---------------------------------------------------------------- state
     def log_event(self, event: str, **fields) -> None:
@@ -138,8 +141,8 @@ class Trainer:
 
     def fit(self) -> bool:
         """Train to ``iterations``. Returns True when finished, False if stopped early (``self.stop``,
-        last.pth saved) or aborted (``self.abort_reason`` = 'nonfinite_loss' or 'val_drop', last.pth NOT
-        overwritten)."""
+        last.pth saved) or aborted (``self.abort_reason`` = 'nonfinite_loss', 'val_drop', 'stalled' or
+        'amp_scale'; last.pth NOT overwritten)."""
         if self.val_fn and self.val_at_start and self.step == 0:
             self._validate()
         self.model.train()
@@ -147,7 +150,7 @@ class Trainer:
         it = self._batches()
         t0 = t_last = time.time()
         data_wait = 0.0  # time blocked on the data loader since the last log row
-        nonfinite_run, grad_norm = 0, torch.tensor(0.0)
+        nonfinite_run, zero_grad_logs, grad_norm = 0, 0, torch.tensor(0.0)
         while self.step < self.iterations:
             if self.stop:
                 ts = time.time()
@@ -155,15 +158,24 @@ class Trainer:
                 self.log_event("stopped", ckpt_sec=round(time.time() - ts, 2))
                 log.close()
                 return False
-            tw = time.time()
-            batch = next(it)
-            data_wait += time.time() - tw
             diag_step = self.diag_fn is not None and (self.step + 1) % self.diag_every == 0
             if diag_step:
                 self.diag_fn(self.model, "begin")
-            with torch.autocast("cuda", dtype=torch.float16, enabled=self.use_amp):
-                loss, parts = self.loss_fn(self.model, batch)
-            if not bool(torch.isfinite(loss)):
+            # One optimizer step = grad_accum micro-batches; each loss is divided by grad_accum, so the gradient
+            # equals that of one batch of (micro-batch x grad_accum) samples.
+            self.opt.zero_grad(set_to_none=True)
+            step_finite, parts = True, {}
+            for _ in range(self.grad_accum):
+                tw = time.time()
+                batch = next(it)
+                data_wait += time.time() - tw
+                with torch.autocast("cuda", dtype=torch.float16, enabled=self.use_amp):
+                    loss, micro_parts = self.loss_fn(self.model, batch)
+                step_finite = step_finite and bool(torch.isfinite(loss))
+                for k, v in micro_parts.items():
+                    parts[k] = parts.get(k, 0.0) + v.detach() / self.grad_accum
+                self.scaler.scale(loss / self.grad_accum).backward()
+            if not step_finite:
                 nonfinite_run += 1
                 if nonfinite_run > self.max_nonfinite:
                     self.abort_reason = "nonfinite_loss"
@@ -172,14 +184,18 @@ class Trainer:
                     return False
             else:
                 nonfinite_run = 0
-            self.opt.zero_grad(set_to_none=True)
-            self.scaler.scale(loss).backward()
             self.scaler.unscale_(self.opt)
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
             self.scaler.step(self.opt)  # skipped by the scaler when gradients are inf / nan
             self.scaler.update()
             self.sched.step()
             self.step += 1
+            if self.scaler.is_enabled() and self.scaler.get_scale() < 1.0:
+                # pilot 3: repeated inf gradients drove the scale towards 0, gradients then underflow to 0
+                self.abort_reason = "amp_scale"
+                self.log_event("aborted_amp_scale", amp_scale=float(self.scaler.get_scale()))
+                log.close()
+                return False
             if diag_step:
                 row = self.diag_fn(self.model, "end")
                 if row:
@@ -194,6 +210,14 @@ class Trainer:
                 t_last, data_wait = now, 0.0
                 log.write(json.dumps(row) + "\n")
                 log.flush()
+                # Stall guard (independent of AMP): a zero gradient norm at max_zero_grad_logs consecutive log rows
+                # means the model no longer learns. Val freezing is NOT used here (tiny lr at the end of the cosine).
+                zero_grad_logs = zero_grad_logs + 1 if float(grad_norm) == 0.0 else 0
+                if zero_grad_logs >= self.max_zero_grad_logs:
+                    self.abort_reason = "stalled"
+                    self.log_event("aborted_stalled", zero_grad_logs=zero_grad_logs)
+                    log.close()
+                    return False
             final_check = self.step == self.iterations and self.val_floor_drop is not None
             if self.val_fn and (self.step % self.val_every == 0 or final_check):
                 self._validate()

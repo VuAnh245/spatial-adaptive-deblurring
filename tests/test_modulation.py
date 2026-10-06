@@ -298,6 +298,79 @@ def test_trainer_aborts_on_val_drop_below_step0_floor(tmp_path):
     assert tr2.resume() and tr2.step == 4 and tr2.val_baseline == 30.0  # floor kept across resumes
 
 
+class _Pairs(torch.utils.data.Dataset):
+    """8 fixed (blur, sharp) pairs of 3 x 32 x 32 for trainer tests."""
+
+    def __init__(self, seed=0):
+        g = torch.Generator().manual_seed(seed)
+        self.b, self.s = torch.rand(8, 3, 32, 32, generator=g), torch.rand(8, 3, 32, 32, generator=g)
+
+    def __len__(self):
+        return 8
+
+    def __getitem__(self, i):
+        return {"blur": self.b[i], "sharp": self.s[i]}
+
+
+def _l1(model, batch):
+    out, _ = model(batch["blur"])
+    loss = (out - batch["sharp"]).abs().mean()
+    return loss, {"loss": loss.detach()}
+
+
+def test_trainer_aborts_when_training_stalls(tmp_path):
+    """grad_norm = 0 at 3 consecutive log rows -> 'aborted_stalled', fit() False (train.py exits 5)."""
+    import json
+    from torch.utils.data import DataLoader
+    from spatial_deblur.engine.trainer import Trainer
+
+    def zero_loss(model, batch):  # loss that does not depend on the weights -> exactly zero gradients
+        out, _ = model(batch["blur"])
+        loss = (out * 0).sum() + 1.0
+        return loss, {"loss": loss.detach()}
+
+    m = build_variant("A0", TINY)
+    tr = Trainer(m, zero_loss, DataLoader(_Pairs(), batch_size=2), tmp_path, lr=1e-3, iterations=50, warmup=1,
+                 amp=False, log_every=2, ckpt_every=100, device="cpu", max_zero_grad_logs=3)
+    assert tr.fit() is False and tr.abort_reason == "stalled" and tr.step == 6
+    events = [json.loads(x)["event"] for x in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert events == ["aborted_stalled"]
+
+
+def test_grad_accumulation_matches_full_batch(tmp_path):
+    """QĐ-07 fallback: batch 4 x 2 accumulation gives the same update as one batch of 8."""
+    from torch.utils.data import DataLoader
+    from spatial_deblur.engine.trainer import Trainer
+
+    torch.manual_seed(0)
+    base = build_variant("A0", TINY)
+    _nonzero_residuals(base)
+    states = []
+    for micro, accum, sub in ((8, 1, "full"), (4, 2, "accum")):
+        m = build_variant("A0", TINY)
+        m.load_state_dict(base.state_dict())
+        tr = Trainer(m, _l1, DataLoader(_Pairs(), batch_size=micro), tmp_path / sub, lr=1e-3, iterations=1,
+                     warmup=1, amp=False, log_every=1, ckpt_every=100, device="cpu", grad_accum=accum)
+        assert tr.fit() is True
+        states.append(m.state_dict())
+    for k in states[0]:
+        assert torch.allclose(states[0][k], states[1][k], atol=1e-6), k
+
+
+def test_trainer_aborts_when_amp_scale_collapses(tmp_path):
+    """An enabled GradScaler whose scale falls below 1 -> 'aborted_amp_scale' (train.py exits 6)."""
+    import json
+    from torch.utils.data import DataLoader
+    from spatial_deblur.engine.trainer import Trainer
+
+    m = build_variant("A0", TINY)
+    tr = Trainer(m, _l1, DataLoader(_Pairs(), batch_size=2), tmp_path, lr=1e-3, iterations=20, warmup=1,
+                 amp=False, log_every=1, ckpt_every=100, device="cpu")
+    tr.scaler = torch.amp.GradScaler("cpu", init_scale=0.5)  # stands in for a scale driven towards 0
+    assert tr.fit() is False and tr.abort_reason == "amp_scale" and tr.step == 1
+    assert json.loads((tmp_path / "events.jsonl").read_text().splitlines()[-1])["event"] == "aborted_amp_scale"
+
+
 def test_param_match_real_config():
     """QĐ-06 on NAFNet-32: 2 blocks at dec1 (17,349,731 params); compute stays within 10% of SFT-Map."""
     ref, base = build_variant("A2"), build_variant("A0")

@@ -4,8 +4,11 @@ _base_:
 - ../_base_/train.yaml
 experiment_id: SA-15
 seed: 1
+# File name kept (configs are never renamed). Content changed 2026-10-06: the public checkpoint's middle block
+# has mean|beta| 0.0036 (others 0.12-0.21), so modulation "only in the middle" would test an inactive stage.
+# SA-15 is now "SFT-Map chỉ ở decoder" (optional, placement not implemented yet).
 model:
   variant: A2
-  placement: mid
+  placement: dec
 loss:
   lambda_map: 0.1

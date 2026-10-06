@@ -49,6 +49,8 @@ def main() -> None:
     ap.add_argument("--ckpt-every", type=int, default=None)
     ap.add_argument("--diag-every", type=int, default=None)
     ap.add_argument("--num-workers", type=int, default=None)
+    ap.add_argument("--grad-accum", type=int, default=None,
+                    help="micro-batches per optimizer step; batch_size stays the effective batch (QĐ-07: 2 if OOM)")
     ap.add_argument("--tag", default="", help="suffix of the result folder, e.g. 'pilot'")
     ap.add_argument("--skip-val-at-start", action="store_true", help="no val pass at step 0 of a fresh run")
     a = ap.parse_args()
@@ -56,12 +58,16 @@ def main() -> None:
     if a.seed is not None:
         cfg["seed"] = a.seed
     for key, val in (("iterations", a.iterations), ("val_every", a.val_every), ("ckpt_every", a.ckpt_every),
-                     ("diag_every", a.diag_every), ("num_workers", a.num_workers)):
+                     ("diag_every", a.diag_every), ("num_workers", a.num_workers), ("grad_accum", a.grad_accum)):
         if val is not None:
             cfg["training"][key] = val
     validate(cfg)
     set_seed(cfg["seed"])
     m, d, t = cfg["model"], cfg["data"], cfg["training"]
+    accum = int(t.get("grad_accum", 1))
+    if t["batch_size"] % accum:
+        raise ValueError(f"batch_size {t['batch_size']} is not divisible by grad_accum {accum}")
+    micro = t["batch_size"] // accum  # loader batch; one optimizer step still sees batch_size samples
     if m.get("placement", "all") != "all" or cfg["loss"].get("extra_loss"):
         raise NotImplementedError("SA-15/16/18/19 are optional: implement placement / extra loss first")
 
@@ -93,7 +99,7 @@ def main() -> None:
                                     d["patch"], d["margin"], d["noise_sigma"],
                                     length=t["iterations"] * t["batch_size"], seed=cfg["seed"],
                                     mask_grids=d["mask_grid_train"])
-    loader = DataLoader(ds, batch_size=t["batch_size"], shuffle=False, num_workers=t["num_workers"],
+    loader = DataLoader(ds, batch_size=micro, shuffle=False, num_workers=t["num_workers"],
                         pin_memory=True, drop_last=True)
     val_set = FixedSyntheticDataset(Path(d["synthetic_root"]) / "val")
 
@@ -106,23 +112,24 @@ def main() -> None:
                       amp=t["amp"], ckpt_every=t["ckpt_every"], val_fn=val_fn if len(val_set) else None,
                       val_every=t["val_every"], device=a.device,
                       diag_fn=make_train_diag(), diag_every=t.get("diag_every", 500),
-                      val_at_start=not a.skip_val_at_start, val_floor_drop=t.get("val_floor_drop"))
+                      val_at_start=not a.skip_val_at_start, val_floor_drop=t.get("val_floor_drop"),
+                      grad_accum=accum)
     if a.resume and trainer.resume():
         # samples are indexed by position, so continue the stream instead of replaying it from index 0
         trainer.loader = DataLoader(Subset(ds, range(trainer.step * t["batch_size"], len(ds))),
-                                    batch_size=t["batch_size"], shuffle=False, num_workers=t["num_workers"],
+                                    batch_size=micro, shuffle=False, num_workers=t["num_workers"],
                                     pin_memory=True, drop_last=True)
         print(f"resumed at step {trainer.step}", flush=True)
     # Notebook time cap sends SIGTERM: save last.pth at the next step boundary and exit cleanly.
     signal.signal(signal.SIGTERM, lambda *_: setattr(trainer, "stop", True))
     trainer.log_event("start", startup_sec=round(time.time() - T_START, 1), git_commit=cfg["git_commit"],
-                      iterations=t["iterations"], lr=t["lr"], batch_size=t["batch_size"],
-                      num_workers=t["num_workers"], **provenance)
+                      iterations=t["iterations"], lr=t["lr"], batch_size=t["batch_size"], grad_accum=accum,
+                      amp=bool(t["amp"]), num_workers=t["num_workers"], **provenance)
     if trainer.fit():
         (out / "train_done.json").write_text(json.dumps({"steps": trainer.step}))
     elif trainer.abort_reason:
         print(f"ABORTED ({trainer.abort_reason}) at step {trainer.step}; last good checkpoint kept in last.pth", flush=True)
-        raise SystemExit({"nonfinite_loss": 3, "val_drop": 4}.get(trainer.abort_reason, 5))
+        raise SystemExit({"nonfinite_loss": 3, "val_drop": 4, "stalled": 5, "amp_scale": 6}.get(trainer.abort_reason, 7))
     else:
         print(f"stopped at step {trainer.step}; resume with --resume", flush=True)
 
