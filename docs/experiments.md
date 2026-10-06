@@ -66,7 +66,7 @@ Phương án "Một ITERS cho mọi mô hình, gói vừa một phiên":
     và chạy lại pilot trước khi khóa; không tune lại sau khi đã train bất kỳ biến thể nào.
     Pilot lần hai (300 iter, SFT-Map và Baseline-L theo QĐ-06 chạy song song, val mới) chỉ đo tốc độ, bộ nhớ,
     val mới và Spearman; ITERS tính từ pilot lần hai;
-(4) chặn thời gian: notebook dừng mọi tiến trình train sau 11 giờ (SIGTERM, lưu `last.pth`), resume ở phiên sau.
+(4) chặn thời gian: notebook dừng mọi tiến trình train sau 11,5 giờ tính từ đầu phiên (SIGTERM, lưu `last.pth`), resume ở phiên sau.
 
 Diễn biến (2026-10-06):
 (1) pilot lần một (SFT-Map chạy một mình, lr 2e-4): dừng ở bước 600 do phiên bị tắt, val 30,96 → 33,32 dB;
@@ -91,7 +91,25 @@ Diễn biến (2026-10-06):
 (7) pilot lần bốn: FP32 (QĐ-07), lr 1e-4, 1500 iter, val ở 0 / 750 / 1500, SFT-Map và Baseline-L song song;
     đo lại bộ nhớ đỉnh, it/s và ITERS.
 
-ITERS = (khóa sau pilot lần bốn) | VAL_EVERY = 2500 | CKPT_EVERY = 2500
+(8) pilot lần bốn (FP32, lr 1e-4, 1500 iter, commit d017c54): **PASS**. SFT-Map 26,66 → 31,10 → 31,81 dB và Baseline-L
+    26,66 → 31,04 → 31,74 dB ở bước 0 / 750 / 1500 (qua lr đỉnh, không tụt, không đóng băng); grad_norm khác 0 ở mọi bước;
+    val bước 0 trùng nhau tới 1e-12 dB; 0,834 it/s cho cả hai run (CPU vẫn là nút thắt, data_frac 0,32-0,34; GPU dùng 87-88%);
+    bộ nhớ đỉnh 12,5 / 11,5 GiB nên không cần tích lũy gradient. FP32 gần như không chậm hơn AMP (0,864 it/s).
+
+**ITERS = 30.000** (khóa 2026-10-06) | VAL_EVERY = 2500 | CKPT_EVERY = 2500 | grad_accum = 1 | chốt chặn thời gian 11,5 giờ.
+
+Lý do chọn 30.000 thay vì 32.000 do công thức tính ra: tốc độ do CPU sinh dữ liệu quyết định, và máy Kaggle mỗi phiên có thể
+khác nhau; ITERS chung cho mọi mô hình nên phải an toàn cho máy chậm nhất. Với 0,834 it/s, 30.000 iter mất khoảng 10,3 giờ
+gồm cả chuẩn bị và val, còn khoảng 1,2 giờ trước chốt chặn 11,5 giờ (chốt chặn gửi SIGTERM, lưu `last.pth`, resume ở phiên sau).
+
+Thứ tự chạy: cặp 1 (SFT-Map SA-13 + Baseline SA-10) trước, cặp 2 (SFT-Free SA-12 + Baseline-L SA-11) ở phiên kế tiếp ngay sau đó,
+cùng một tài khoản; chỉ chuyển cặp 2 sang tài khoản khác nếu cặp 1 gặp sự cố. Cả hai cặp chạy đúng một commit đã khóa
+(notebook `sad-train` checkout commit đó và kiểm tra hash).
+
+Mốc theo dõi `val_spearman` của SFT-Map (SA-13) ở bước **2.500 / 5.000 / 7.500 / 10.000**. Ở pilot lần bốn giá trị này vẫn
+quanh 0 sau 1.500 bước (bản đồ mới học mức nhòe trung bình). Theo thiết kế: nếu vẫn đứng yên gần 0 ở bước 10.000 thì dừng
+lại phân tích trước khi đọc kết quả của cặp 2; phép thử bộ ước lượng (`analysis/probe_estimator.py`) cho biết bản đồ có học
+được với cùng bộ sinh dữ liệu hay không.
 
 ## QĐ-07 Độ chính xác số khi train (chốt 2026-10-06)
 

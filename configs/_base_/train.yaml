@@ -5,13 +5,13 @@ training:
   weight_decay: 1.0e-3  # matches official NAFNet-width32 GoPro config
   warmup: 1000
   min_lr: 1.0e-7
-  iterations: 40000     # adjust after the pilot; identical for every variant
+  iterations: 30000     # QĐ-04, locked after pilot 4 (0.834 it/s -> 32000 fits); 30000 leaves room for slower CPU hosts
   batch_size: 8         # effective batch per optimizer step
   grad_accum: 1         # QĐ-07: if FP32 runs out of memory at batch 8, set 2 (micro-batch 4 x 2), same effective batch
   amp: false            # QĐ-07 "FP32 toàn phần": 3 pilots in a row had AMP numeric failures; NAFNet trains in FP32
   grad_clip: 1.0
-  ckpt_every: 5000
-  val_every: 5000
+  ckpt_every: 2500      # multiple of val_every: a checkpoint is written only after its val passed the floor
+  val_every: 2500
   val_floor_drop: 1.0   # QĐ-04: stop (exit 4) if val PSNR < step-0 val - 1 dB; a floor, not checkpoint selection
   diag_every: 500      # ||W|| of SFT last convs, mean |dgamma_s|, |beta_s| per stage -> diag.jsonl
   num_workers: 2        # two runs share one Kaggle T4 x2 session (4 vCPU): 2 loader workers each

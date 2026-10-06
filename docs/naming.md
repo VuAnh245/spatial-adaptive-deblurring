@@ -147,7 +147,7 @@ Số thập phân trong hình dùng dấu phẩy (0,45). Kết luận của `scr
 | QĐ-01 | Giao thức đánh giá | "TLC chính, global phụ" | Đã chốt 2026-10-05 (`docs/experiments.md`) |
 | QĐ-02 | Thang vùng nhòe train và test | Chọn "Ô vuông + đa thang" (loại "Giữ lưới cũ") | Đã chốt 2026-10-05, trước Bước 5 (`docs/experiments.md`). Số EDA chỉ để xác nhận và ghi vào báo cáo |
 | QĐ-03 | Ngưỡng nhóm H | "Theo phân vị 33/67" trên H của các mẫu R ≥ 2 (500 mẫu EDA, làm tròn 2 chữ số); nhóm "H bằng 0" gồm các ảnh R = 1 | Quy tắc đã chốt, chờ số EDA rồi ghi vào config trước Bước 5 |
-| QĐ-04 | Công thức huấn luyện và số iteration chung | "Một ITERS cho mọi mô hình, gói vừa một phiên" (batch 8; lr hạ từ 2e-4 xuống 1e-4 sau khi pilot lần hai phân kỳ) | Quy tắc đã chốt, ITERS khóa sau pilot lần bốn (`docs/experiments.md`) |
+| QĐ-04 | Công thức huấn luyện và số iteration chung | "Một ITERS cho mọi mô hình, gói vừa một phiên" (batch 8; lr hạ từ 2e-4 xuống 1e-4 sau khi pilot lần hai phân kỳ) | Đã chốt: lr 1e-4, FP32, ITERS = 30.000, chốt chặn 11,5 giờ (`docs/experiments.md`) |
 | QĐ-05 | Đơn vị gộp khi kiểm định | "Gộp theo video" (10 nhóm trên GoPro test), báo kèm tỉ lệ thắng theo ảnh | Đã chốt 2026-10-06 |
 | QĐ-06 | Quy tắc khớp tham số của Baseline-L | "Ít block nhất, lệch ≤ 5% phần thêm" (2 block ở dec1, 17.349.731 tham số); loại "Khớp tuyệt đối", "Một block ở dec0" | Đã chốt 2026-10-06 |
 | QĐ-07 | Độ chính xác số khi train | "FP32 toàn phần" (loại "AMP + dò lỗi"); nếu hết bộ nhớ thì tích lũy gradient 4 × 2 | Đã chốt 2026-10-06 |
