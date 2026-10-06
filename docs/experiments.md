@@ -54,7 +54,7 @@ làm tròn 2 chữ số. Nhóm "H bằng 0" gồm các ảnh R = 1.
 ## QĐ-04 Công thức huấn luyện và số iteration chung (quy tắc chốt 2026-10-05, số ITERS ghi sau pilot)
 
 Phương án "Một ITERS cho mọi mô hình, gói vừa một phiên":
-(1) công thức giống nhau cho Baseline, Baseline-L, SFT-Free, SFT-Map, SFT-Map+Ch: AdamW lr 2e-4, betas (0,9; 0,9),
+(1) công thức giống nhau cho Baseline, Baseline-L, SFT-Free, SFT-Map, SFT-Map+Ch: AdamW lr 1e-4 (ban đầu 2e-4, hạ theo (3)), betas (0,9; 0,9),
     weight decay 1e-3, batch 8, patch 256, warmup 1000 iter rồi cosine về 1e-7, AMP FP16, gradient clip 1,0,
     2 worker DataLoader mỗi tiến trình (hai run chạy chung một phiên T4 × 2);
 (2) ITERS tính theo mô hình chậm nhất đo được ở pilot (pilot chạy SFT-Map và Baseline-L song song;
@@ -68,7 +68,24 @@ Phương án "Một ITERS cho mọi mô hình, gói vừa một phiên":
     val mới và Spearman; ITERS tính từ pilot lần hai;
 (4) chặn thời gian: notebook dừng mọi tiến trình train sau 11 giờ (SIGTERM, lưu `last.pth`), resume ở phiên sau.
 
-ITERS = (điền sau pilot) | VAL_EVERY = 2500 | CKPT_EVERY = 2500
+Diễn biến (2026-10-06):
+(1) pilot lần một (SFT-Map chạy một mình, lr 2e-4): dừng ở bước 600 do phiên bị tắt, val 30,96 → 33,32 dB;
+(2) pilot lần hai (SFT-Map + Baseline-L theo QĐ-06, lr 2e-4, 1200 iter, val mới): tới bước 600 val tăng
+    (34,43 và 33,46 dB) nhưng ở lr đỉnh thì phân kỳ: SFT-Map còn 19,25 dB ở bước 1200, Baseline-L ra NaN.
+    Tốc độ 0,959 it/s khi hai run chạy song song (CPU là nút thắt, data_frac 0,40-0,45), ITERS ước tính 36.000;
+(3) áp dụng quy tắc (3): **lr = 1e-4**. Kèm hai sửa chống mất ổn định số học không đổi công thức: LayerNorm2d tính
+    thống kê bằng FP32 trong autocast; chốt chặn dừng run sau hơn 50 bước liên tiếp có loss không hữu hạn
+    (không ghi đè `last.pth` tốt cuối cùng). `curves.csv` ghi thêm `grad_norm`, `amp_scale`;
+(4) pilot lần ba: lr 1e-4, 1500 iter, val ở 0 / 750 / 1500, SFT-Map và Baseline-L song song. ITERS khóa sau pilot lần ba;
+(5) chốt chặn sàn theo val (`val_floor_drop: 1.0`): nếu một lần val có PSNR thấp hơn val ở bước 0 (tức checkpoint công khai
+    ban đầu) quá 1 dB, hoặc không hữu hạn, run dừng ngay, ghi `aborted_val_drop`, không ghi đè `last.pth`, `train.py` thoát mã 4.
+    Pilot lần hai cho thấy cần chốt này: SFT-Map sụp từ 34,43 xuống 19,25 dB mà loss vẫn hữu hạn, chốt chặn NaN không bắt được.
+    **Đây là mức sàn chống sụp, không phải chọn checkpoint theo val**: mô hình đem đánh giá luôn là checkpoint cuối của run
+    chạy hết ITERS; run bị dừng không được thay bằng checkpoint tốt nhất mà phải xử lý theo (3) (hạ lr, chạy lại pilot) và áp
+    dụng chung cho mọi biến thể. Checkpoint ở bước có val chỉ được ghi sau khi val đó qua sàn (ckpt_every là bội của val_every),
+    và bước cuối luôn được val trước khi ghi.
+
+ITERS = (khóa sau pilot lần ba) | VAL_EVERY = 2500 | CKPT_EVERY = 2500
 
 ## QĐ-05 Đơn vị gộp khi kiểm định (chốt 2026-10-06, trước mọi đánh giá)
 
@@ -104,7 +121,10 @@ SFT-Map chỉ chiếm khoảng 1,35% tổng) nên không phân biệt được c
 
 `diag.jsonl` (mỗi `diag_every` = 500 iter): ‖W‖ lớp cuối của SFT head theo stage (`w_sft_<stage>`),
 trung bình |Δγ_s| và |β_s| theo stage (`dgamma_<stage>`, `beta_<stage>`), kèm `charbonnier`, `l_map`, `loss`.
-`curves.csv` (mỗi 100 iter) ghi `l_map` riêng cho mọi biến thể có bộ ước lượng, kể cả SFT-Free (lambda_map = 0, chỉ để theo dõi).
+`curves.csv` (mỗi 100 iter) ghi `l_map` riêng cho mọi biến thể có bộ ước lượng, kể cả SFT-Free (lambda_map = 0, chỉ để theo dõi),
+cùng `grad_norm`, `amp_scale`, `nonfinite_run`. `diag.jsonl` ghi thêm `mid_beta_abs`, `mid_gamma_abs` (trung bình |beta|, |gamma|
+của block middle, vốn quyết định head `mid0` có tác dụng hay không). Val ghi `val_psnr`, `val_map_mae` (mọi ảnh) và
+`val_spearman` (chỉ ảnh R ≥ 2).
 Cảnh báo cần dừng phân tích: `w_sft_*` của SFT-Free hoặc SFT-Map đứng gần 0 sau 10k iter.
 
 | ID | Tên đọc được | Biến thể | Seed | Mức | Config |

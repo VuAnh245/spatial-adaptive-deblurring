@@ -189,6 +189,115 @@ def test_trainer_val_at_start_and_graceful_stop(tmp_path):
     assert vals == [0]  # val at start only for the fresh run, not after resume
 
 
+def test_val_metrics_spearman_is_one_for_a_perfect_map():
+    """Through the val code path used in training: S_hat = down4(S) gives Spearman ~ 1 on R >= 2 images,
+    R = 1 images (constant S) are skipped instead of turning the mean into NaN."""
+    import math
+    import torch.nn.functional as F
+    from spatial_deblur.modulation.analysis import val_metrics
+
+    h, w = 64, 96
+    yy, xx = torch.meshgrid(torch.linspace(0, 1, h), torch.linspace(0, 1, w), indexing="ij")
+    ramps = [0.1 + 0.6 * (0.3 * yy + 0.7 * xx), 0.7 - 0.5 * (0.8 * yy + 0.2 * xx)]
+    val_set = [{"blur": torch.rand(3, h, w), "sharp": torch.rand(3, h, w), "smap": r[None], "regions": 3} for r in ramps]
+    val_set.append({"blur": torch.rand(3, h, w), "sharp": torch.rand(3, h, w),
+                    "smap": torch.full((1, h, w), 0.4), "regions": 1})
+    maps = iter([F.interpolate(s["smap"][None], scale_factor=0.25, mode="area") for s in val_set])
+
+    def perfect_model(x):
+        return x, next(maps)  # S_hat = down4(S), exactly what L_map trains towards
+
+    out = val_metrics(perfect_model, val_set, "cpu")
+    assert math.isfinite(out["val_spearman"]) and out["val_spearman"] > 0.999, out
+    assert out["val_map_mae"] < 0.01, out
+
+
+def test_trainer_aborts_on_nonfinite_loss_and_keeps_last_good_checkpoint(tmp_path):
+    """More than max_nonfinite consecutive non-finite losses -> fit() returns False, event aborted_nonfinite,
+    and last.pth still holds the last finite state (later checkpoints are skipped, not overwritten)."""
+    import json
+    from torch.utils.data import DataLoader, TensorDataset
+    from spatial_deblur.engine.trainer import Trainer
+
+    class Wrap(torch.utils.data.Dataset):
+        def __init__(self):
+            self.t = TensorDataset(torch.rand(8, 3, 32, 32), torch.rand(8, 3, 32, 32))
+
+        def __len__(self):
+            return 8
+
+        def __getitem__(self, i):
+            b, s = self.t[i]
+            return {"blur": b, "sharp": s}
+
+    calls = {"n": 0}
+
+    def loss_fn(model, batch):
+        calls["n"] += 1
+        out, _ = model(batch["blur"])
+        loss = (out - batch["sharp"]).abs().mean()
+        if calls["n"] > 4:
+            loss = loss * float("nan")  # diverged from step 5 on
+        return loss, {"loss": loss.detach()}
+
+    m = build_variant("A0", TINY)
+    _nonzero_residuals(m)
+    tr = Trainer(m, loss_fn, DataLoader(Wrap(), batch_size=2), tmp_path, lr=1e-3, iterations=200, warmup=1,
+                 amp=False, log_every=1, ckpt_every=2, device="cpu", max_nonfinite=50)
+    assert tr.fit() is False and tr.abort_reason == "nonfinite_loss"
+    saved = torch.load(tmp_path / "last.pth", map_location="cpu", weights_only=False)
+    assert saved["step"] == 4 and all(torch.isfinite(v).all() for v in saved["model"].values())
+    events = [json.loads(x)["event"] for x in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert events.count("ckpt") == 2 and "ckpt_skipped_nonfinite" in events and events[-1] == "aborted_nonfinite"
+    assert not (tmp_path / "final.pth").exists()
+    rows = [json.loads(x) for x in (tmp_path / "curves.csv").read_text().splitlines()]
+    assert {"grad_norm", "amp_scale", "nonfinite_run"} <= set(rows[0])
+
+
+def test_trainer_aborts_on_val_drop_below_step0_floor(tmp_path):
+    """Collapse with a finite loss (pilot 2): a val pass more than 1 dB below the step-0 val stops the run,
+    event aborted_val_drop, last.pth keeps the last checkpoint that passed val; the floor survives a resume."""
+    import json
+    from torch.utils.data import DataLoader, TensorDataset
+    from spatial_deblur.engine.trainer import Trainer
+
+    class Wrap(torch.utils.data.Dataset):
+        def __init__(self):
+            self.t = TensorDataset(torch.rand(8, 3, 32, 32), torch.rand(8, 3, 32, 32))
+
+        def __len__(self):
+            return 8
+
+        def __getitem__(self, i):
+            b, s = self.t[i]
+            return {"blur": b, "sharp": s}
+
+    def loss_fn(model, batch):
+        out, _ = model(batch["blur"])
+        loss = (out - batch["sharp"]).abs().mean()
+        return loss, {"loss": loss.detach()}
+
+    scripted = iter([30.0, 31.5, 30.2, 28.9])  # steps 0, 2, 4, 6: 28.9 < 30.0 - 1.0 -> abort at step 6
+
+    def make():
+        m = build_variant("A0", TINY)
+        return Trainer(m, loss_fn, DataLoader(Wrap(), batch_size=2), tmp_path, lr=1e-3, iterations=20, warmup=1,
+                       amp=False, log_every=1, val_every=2, ckpt_every=2, device="cpu", val_at_start=True,
+                       val_fn=lambda model: {"val_psnr": next(scripted)}, val_floor_drop=1.0)
+
+    tr = make()
+    assert tr.fit() is False and tr.abort_reason == "val_drop" and tr.step == 6
+    saved = torch.load(tmp_path / "last.pth", map_location="cpu", weights_only=False)
+    assert saved["step"] == 4  # step 6 failed val, so its checkpoint was never written
+    ev = [json.loads(x) for x in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert [e["event"] for e in ev] == ["ckpt", "ckpt", "aborted_val_drop"]
+    assert ev[-1]["baseline"] == 30.0 and abs(ev[-1]["drop"] - 1.1) < 1e-9
+    assert not (tmp_path / "final.pth").exists()
+
+    tr2 = make()
+    assert tr2.resume() and tr2.step == 4 and tr2.val_baseline == 30.0  # floor kept across resumes
+
+
 def test_param_match_real_config():
     """QĐ-06 on NAFNet-32: 2 blocks at dec1 (17,349,731 params); compute stays within 10% of SFT-Map."""
     ref, base = build_variant("A2"), build_variant("A0")

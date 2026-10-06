@@ -1,6 +1,6 @@
 training:
   optimizer: adamw
-  lr: 2.0e-4            # not tuned (time limit); fine-tune lr, official 1e-3 is for training from scratch at batch 32
+  lr: 1.0e-4            # QĐ-04 (3): pilot 2 diverged at the 2e-4 peak (SFT-Map -11.7 dB, Baseline-L NaN) -> 1e-4
   betas: [0.9, 0.9]     # matches official NAFNet-width32 GoPro config
   weight_decay: 1.0e-3  # matches official NAFNet-width32 GoPro config
   warmup: 1000
@@ -11,7 +11,8 @@ training:
   grad_clip: 1.0
   ckpt_every: 5000
   val_every: 5000
-  diag_every: 500       # ||W|| of SFT last convs, mean |dgamma_s|, |beta_s| per stage -> diag.jsonl
+  val_floor_drop: 1.0   # QĐ-04: stop (exit 4) if val PSNR < step-0 val - 1 dB; a floor, not checkpoint selection
+  diag_every: 500      # ||W|| of SFT last convs, mean |dgamma_s|, |beta_s| per stage -> diag.jsonl
   num_workers: 2        # two runs share one Kaggle T4 x2 session (4 vCPU): 2 loader workers each
 loss:
   charbonnier_eps: 1.0e-3

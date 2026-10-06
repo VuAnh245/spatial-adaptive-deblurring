@@ -4,8 +4,9 @@
         --gpu-log results/pilot_gpu.csv --val-every 2500 --ckpt-every 2500
 
 Per run: it/s (curves.csv 'sec', first log row excluded as warm-up), mean data_frac, val PSNR at every val
-step; the LAST val step (1200 in the pilot, past the 1000-step warmup, i.e. at the peak lr) is compared
-with step 0 (drop > 0.3 dB -> suggest a lower lr), startup / checkpoint time (events.jsonl),
+step; the LAST val step (past the 1000-step warmup, i.e. at the peak lr) is compared with step 0
+(drop > 0.3 dB, or a non-finite value -> FAIL), grad_norm / amp_scale per log row, abort events,
+startup / checkpoint time (events.jsonl),
 the last diag.jsonl row. Then GPU use, the step-0 identity check (every variant starts from the same
 checkpoint with zero-initialised extras, so step-0 val PSNR must match) and ITERS: one value for all
 four models, sized on the SLOWEST run so that one Kaggle session (12 h) holds setup + startup + val +
@@ -36,7 +37,7 @@ def main() -> None:
     ap.add_argument("--max-drop-db", type=float, default=0.3)
     a = ap.parse_args()
 
-    speeds, val_secs, ckpt_secs, startups, step0 = [], [], [], [], {}
+    speeds, val_secs, ckpt_secs, startups, step0, failures = [], [], [], [], {}, []
     for run in map(Path, a.runs):
         cur, val, diag, ev = (rows(run / n) for n in ("curves.csv", "val.jsonl", "diag.jsonl", "events.jsonl"))
         print(f"\n=== {run.name} ===")
@@ -46,6 +47,9 @@ def main() -> None:
                   f"account {start.get('account')} | host {start.get('host')} | startup {start.get('startup_sec')} s")
             startups.append(start.get("startup_sec", 0.0))
         ckpt_secs += [e["ckpt_sec"] for e in ev if e["event"] == "ckpt"]
+        bad_events = [e for e in ev if e["event"] in ("aborted_nonfinite", "ckpt_skipped_nonfinite", "aborted_val_drop")]
+        if bad_events:
+            failures.append(f"{run.name}: events {[(e['event'], e['step']) for e in bad_events]}")
         if len(cur) >= 2:
             first, last = cur[1] if len(cur) > 2 else cur[0], cur[-1]
             its = (last["step"] - first["step"]) / max(last["sec"] - first["sec"], 1e-9)
@@ -53,6 +57,13 @@ def main() -> None:
             frac = sum(r["data_frac"] for r in cur[1:]) / max(len(cur) - 1, 1)
             print(f"steps {cur[0]['step']}..{last['step']} | {its:.3f} it/s | mean data_frac {frac:.2f}")
             print("last loss parts: " + ", ".join(f"{k}={last[k]:.4f}" for k in ("charbonnier", "l_map", "loss") if k in last))
+            if "grad_norm" in last:
+                print("grad_norm by step: " + ", ".join(f"{r['step']}:{r['grad_norm']:.3g}" for r in cur))
+                print(f"amp_scale min {min(r['amp_scale'] for r in cur):.0f} | "
+                      f"max nonfinite_run {max(r.get('nonfinite_run', 0) for r in cur)}")
+            bad = [r["step"] for r in cur if not all(math.isfinite(r[k]) for k in ("charbonnier", "loss") if k in r)]
+            if bad:
+                failures.append(f"{run.name}: non-finite training loss from step {bad[0]}")
         else:
             print("not enough curves rows")
         for v in val:
@@ -62,14 +73,24 @@ def main() -> None:
         if v0:
             step0[run.name] = v0["val_psnr"]
         if v0 and len(val) > 1:
-            drop = v0["val_psnr"] - val[-1]["val_psnr"]
-            msg = (f"DROP {drop:.2f} dB > {a.max_drop_db} -> propose lr 1e-4 (range 1e-4..2e-4) and re-pilot"
-                   if drop > a.max_drop_db else "within limit, keep lr")
-            print(f"val PSNR step 0 -> {val[-1]['step']}: {v0['val_psnr']:.3f} -> {val[-1]['val_psnr']:.3f} | {msg}")
+            end = val[-1]["val_psnr"]
+            drop = v0["val_psnr"] - end
+            if not math.isfinite(end):  # NaN / inf is a failure, never "within limit"
+                msg = "FAIL: val PSNR is not finite (diverged)"
+                failures.append(f"{run.name}: val PSNR {end} at step {val[-1]['step']}")
+            elif drop > a.max_drop_db:
+                msg = f"FAIL: DROP {drop:.2f} dB > {a.max_drop_db} -> lower lr (range 1e-4..2e-4) and re-pilot"
+                failures.append(f"{run.name}: val drop {drop:.2f} dB")
+            else:
+                msg = "within limit, keep lr"
+            print(f"val PSNR step 0 -> {val[-1]['step']}: {v0['val_psnr']:.3f} -> {end:.3f} | {msg}")
         if diag:
             d = diag[-1]
             stages = [k[len("w_sft_"):] for k in d if k.startswith("w_sft_")]
             print(f"diag rows: {len(diag)} (steps {[r['step'] for r in diag]})")
+            if "mid_beta_abs" in d:
+                print("middle block mean|beta| by step: " + ", ".join(f"{r['step']}:{r['mid_beta_abs']:.2e}" for r in diag)
+                      + f" | mean|gamma| last {d['mid_gamma_abs']:.2e}")
             print("stage    ||W_sft||   |dgamma_s|   |beta_s|")
             for s in stages:
                 print(f"{s:8s} {d[f'w_sft_{s}']:10.5f} {d.get(f'dgamma_{s}', float('nan')):11.6f} "
@@ -112,6 +133,10 @@ def main() -> None:
               f"(expected session length {hours:.2f} h)")
         print("note: SFT-Free has the SFT-Map architecture; Baseline is the lightest model. "
               "If the pilot did not include Baseline-L or SFT-Map, the slowest model was not measured.")
+
+    if len(step0) > 1 and max(step0.values()) - min(step0.values()) >= 0.01:
+        failures.append("step-0 identity mismatch")
+    print("\n=== PILOT VERDICT ===\n" + ("PASS" if not failures else "FAIL\n- " + "\n- ".join(failures)))
 
 
 if __name__ == "__main__":

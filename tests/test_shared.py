@@ -93,6 +93,24 @@ def test_config_inheritance(tmp_path):
     assert load_config(tmp_path / "child.yaml") == {"a": 1, "b": {"x": 1, "y": 3}}
 
 
+def test_layernorm2d_fp32_statistics():
+    """LayerNorm2d equals a channel LayerNorm in FP32 and stays finite on large FP16 inputs
+    (the plain FP16 version overflows: (x - mu)^2 > 65504 once |x - mu| > ~256)."""
+    import torch.nn.functional as F
+    from spatial_deblur.models.nafnet import LayerNorm2d
+    torch.manual_seed(0)
+    ln = LayerNorm2d(8)
+    ln.weight.data.normal_(1, 0.1)
+    ln.bias.data.normal_(0, 0.1)
+    x = torch.randn(2, 8, 5, 7)
+    ref = F.layer_norm(x.permute(0, 2, 3, 1), (8,), ln.weight, ln.bias, ln.eps).permute(0, 3, 1, 2)
+    assert torch.allclose(ln(x), ref, atol=1e-5)
+    big = (x * 2000).half()
+    out = ln(big)
+    assert out.dtype == torch.float16 and torch.isfinite(out).all()
+    assert torch.allclose(out.float(), ref, atol=1e-2)
+
+
 def test_nafnet_shapes_and_padding():
     m = NAFNet(width=8, enc_blk_nums=(1, 1, 1, 1), dec_blk_nums=(1, 1, 1, 1))
     x = torch.rand(1, 3, 37, 50)

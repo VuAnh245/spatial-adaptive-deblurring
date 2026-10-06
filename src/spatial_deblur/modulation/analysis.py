@@ -41,6 +41,30 @@ def heterogeneity(smap: np.ndarray) -> float:
     return float(np.std(smap))
 
 
+@torch.no_grad()
+def val_metrics(model, val_set, device: str = "cpu", max_images: int = 50) -> dict[str, float]:
+    """Monitoring metrics of a val pass during training (train.py): PSNR on every image; for models with
+    a map, MAE of S_hat on every image and Spearman(S_hat, S) only on images with R >= 2 (undefined for a
+    constant map), averaged with nanmean."""
+    from ..metrics.image_quality import psnr
+    ps, sp, mae = [], [], []
+    for i in range(0, len(val_set), max(1, len(val_set) // max_images)):
+        s = val_set[i]
+        pred, s_hat = model(s["blur"][None].to(device))
+        ps.append(psnr(pred[0].clamp(0, 1).permute(1, 2, 0).float().cpu().numpy(),
+                       s["sharp"].permute(1, 2, 0).numpy()))
+        if s_hat is not None:
+            q = map_quality(s_hat.float().cpu(), s["smap"][None])
+            mae.append(q["mae"])
+            if s["regions"] > 1:
+                sp.append(q["spearman"])
+    out = {"val_psnr": float(np.mean(ps))}
+    if mae:
+        out.update(val_map_mae=float(np.mean(mae)),
+                   val_spearman=float(np.nanmean(sp)) if sp and not np.all(np.isnan(sp)) else float("nan"))
+    return out
+
+
 def make_train_diag():
     """Training diagnostics for Trainer(diag_fn=...), logged every ``diag_every`` steps to diag.jsonl:
     ||W|| of every SFT head's last conv (zero at init: shows whether the heads leave zero at all),
@@ -53,7 +77,8 @@ def make_train_diag():
             model.mod_stats = {}
             return None
         stats, model.mod_stats = model.mod_stats or {}, None
-        row = {}
+        mid = model.middle_blks[0]  # its residual scales gate how much the mid0 modulation can matter
+        row = {"mid_beta_abs": float(mid.beta.detach().abs().mean()), "mid_gamma_abs": float(mid.gamma.detach().abs().mean())}
         for key, head in model.sft.items():
             row[f"w_sft_{key}"] = float(head.conv2.weight.detach().norm())
             if key in stats:

@@ -29,6 +29,16 @@ Shared modules (`src/spatial_deblur/{data,degradations,models,classical,engine,m
   (GOPR0374_11 had 3 more clips in train), content sha256 `5350747d6c56f2b6`; new val sha256: (fill in after
   the first generation on Kaggle).
 - `scripts/compare.py --group-by video` (default, QĐ-05) and `win_rate_images`.
+- `models/nafnet.LayerNorm2d`: statistics in FP32 inside autocast (FP16 (x - mu)^2 overflows above ~256);
+  identical in FP32, so SA-00 is unaffected.
+- `engine/trainer`: `curves.csv` adds `grad_norm`, `amp_scale`, `nonfinite_run`; abort after more than
+  `max_nonfinite` (50) consecutive non-finite losses (`aborted_nonfinite`, `fit() -> False`, `abort_reason`),
+  and periodic checkpoints are skipped (`ckpt_skipped_nonfinite`) while the loss is non-finite.
+  Floor guard `Trainer(val_floor_drop=...)`: a val pass below the step-0 val minus the margin (or non-finite) stops
+  the run (`aborted_val_drop`, `abort_reason='val_drop'`, last.pth not overwritten; train.py exits 4); the step-0
+  baseline is re-read from val.jsonl on resume; the final step is validated before its checkpoint.
+- Study code: `modulation/analysis.val_metrics` (val pass used by train.py, tested); diag adds middle-block |beta|.
+  Training lr 2e-4 -> 1e-4 after pilot 2 diverged at the peak lr (QĐ-04).
 - Study code (not shared): Baseline-L param matching QĐ-06 (2 blocks at dec1 instead of 28 at dec3);
   val Spearman only on R >= 2 with nanmean (was NaN), plus `val_map_mae`.
 - Test sets reduced for the 5-day schedule (val 50/R, test_in 100/R, ood 100, straight/curved 50).

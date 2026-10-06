@@ -26,10 +26,16 @@ class LayerNorm2d(nn.Module):
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        mu = x.mean(1, keepdim=True)
-        var = (x - mu).pow(2).mean(1, keepdim=True)
-        y = (x - mu) / torch.sqrt(var + self.eps)
-        return self.weight.view(1, -1, 1, 1) * y + self.bias.view(1, -1, 1, 1)
+        # Statistics in FP32 even under AMP: (x - mu)^2 overflows FP16 (max 65504) once |x - mu| > ~256.
+        # Identical to the plain version in FP32, so FP32 inference (SA-00) is unchanged.
+        dtype = x.dtype
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            x = x.float()
+            mu = x.mean(1, keepdim=True)
+            var = (x - mu).pow(2).mean(1, keepdim=True)
+            y = (x - mu) / torch.sqrt(var + self.eps)
+            y = self.weight.float().view(1, -1, 1, 1) * y + self.bias.float().view(1, -1, 1, 1)
+        return y.to(dtype)
 
 
 class SimpleGate(nn.Module):
