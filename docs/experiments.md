@@ -104,7 +104,7 @@ gồm cả chuẩn bị và val, còn khoảng 1,2 giờ trước chốt chặn 
 
 Thứ tự chạy: cặp 1 (SFT-Map SA-13 + Baseline SA-10) trước, cặp 2 (SFT-Free SA-12 + Baseline-L SA-11) ở phiên kế tiếp ngay sau đó,
 cùng một tài khoản; chỉ chuyển cặp 2 sang tài khoản khác nếu cặp 1 gặp sự cố. Cả hai cặp chạy đúng một commit đã khóa
-(notebook `sad-train` checkout commit đó và kiểm tra hash).
+(notebook `sad-train` checkout commit đó và kiểm tra hash): **`faf4a06`** (khóa 2026-10-06).
 
 Mốc theo dõi `val_spearman` của SFT-Map (SA-13) ở bước **2.500 / 5.000 / 7.500 / 10.000**. Ở pilot lần bốn giá trị này vẫn
 quanh 0 sau 1.500 bước (bản đồ mới học mức nhòe trung bình). Theo thiết kế: nếu vẫn đứng yên gần 0 ở bước 10.000 thì dừng
