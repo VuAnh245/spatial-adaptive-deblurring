@@ -28,7 +28,7 @@ from spatial_deblur.data.manifests import read_list, video_of
 from spatial_deblur.metrics.image_quality import local_psnr, psnr, ssim
 from spatial_deblur.models.tlc import convert_tlc
 from spatial_deblur.modulation.analysis import heterogeneity, map_quality, predict
-from spatial_deblur.modulation.variants import build_variant
+from spatial_deblur.modulation.variants import apply_model_options, build_variant
 from spatial_deblur.utils.config import load_config
 
 
@@ -45,6 +45,8 @@ def main() -> None:
     ap.add_argument("--out", default=None)
     ap.add_argument("--blind", action="store_true", help="print progress only, no metric")
     a = ap.parse_args()
+    torch.backends.cudnn.allow_tf32 = False  # FP32 as in training (no effect on T4)
+    torch.backends.cuda.matmul.allow_tf32 = False
     cfg = load_config(a.config)
     m, d = cfg["model"], cfg["data"]
     out = Path(a.out or f"results/{cfg['experiment_id']}_eval_{a.split}_{a.mode}_{a.pool}.csv")
@@ -59,7 +61,7 @@ def main() -> None:
         raise SystemExit("SA-29: run `python analysis/classical_baselines.py` (Wiener / RL, true kernel, R = 1)")
 
     kw = {k: m[k] for k in ("width", "middle_blk_num", "enc_blk_nums", "dec_blk_nums")}
-    model = build_variant(m["variant"], kw)
+    model = apply_model_options(build_variant(m["variant"], kw), m)  # chan_input of A3 (QĐ-08)
     model.load_state_dict(torch.load(a.ckpt, map_location="cpu"))
     model = model.eval()
     if a.pool == "tlc":

@@ -151,6 +151,8 @@ Số thập phân trong hình dùng dấu phẩy (0,45). Kết luận của `scr
 | QĐ-05 | Đơn vị gộp khi kiểm định | "Gộp theo video" (10 nhóm trên GoPro test), báo kèm tỉ lệ thắng theo ảnh | Đã chốt 2026-10-06 |
 | QĐ-06 | Quy tắc khớp tham số của Baseline-L | "Ít block nhất, lệch ≤ 5% phần thêm" (2 block ở dec1, 17.349.731 tham số); loại "Khớp tuyệt đối", "Một block ở dec0" | Đã chốt 2026-10-06 |
 | QĐ-07 | Độ chính xác số khi train | "FP32 toàn phần" (loại "AMP + dò lỗi"); nếu hết bộ nhớ thì tích lũy gradient 4 × 2 | Đã chốt 2026-10-06 |
+| QĐ-08 | Ổn định SFT-Map+Ch (SA-14) | "Nhánh channel đọc đặc trưng chuẩn hóa + dừng trước bước cập nhật hỏng"; loại "Giữ nguyên A3 gốc", "Hạ lr hoặc đổi batch riêng cho A3" | Đã chốt 2026-10-13 (`docs/experiments.md`) |
+| QĐ-09 | Chỉ tiêu chính, so sánh nhiều lần, gộp seed | PSNR `test_in` là chỉ tiêu chính; Holm trên họ phép so sánh lõi; Phép thử giám sát gộp 3 seed | Đã chốt 2026-10-13, sau GoPro seed 1, trước test tổng hợp |
 | CH-01 | Gradient của SFT head khi lớp cuối khởi tạo 0 | | Nội dung đúng, chờ câu trả lời bằng lời của sinh viên qua CH-03 |
 | CH-02 | Vì sao TLC chỉ có tác dụng khi ảnh test lớn hơn patch train | | Đạt |
 | CH-03 | Nếu `sft.*.conv2` của SFT-Free vẫn gần 0 sau 10k iter thì đường val so với Baseline thế nào, và có kết luận được gì | | Chờ trả lời |

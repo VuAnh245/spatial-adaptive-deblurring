@@ -13,6 +13,8 @@ training:
   ckpt_every: 2500      # multiple of val_every: a checkpoint is written only after its val passed the floor
   val_every: 2500
   val_floor_drop: 1.0   # QĐ-04: stop (exit 4) if val PSNR < step-0 val - 1 dB; a floor, not checkpoint selection
+  fail_fast_nonfinite: true  # QĐ-08 (2026-10-13): non-finite loss/grad norm stops BEFORE the optimizer step (exit 3).
+                             # Runs locked at faf4a06 had no such step (nonfinite_run 0 throughout), so they are unaffected.
   diag_every: 500      # ||W|| of SFT last convs, mean |dgamma_s|, |beta_s| per stage -> diag.jsonl
   num_workers: 2        # two runs share one Kaggle T4 x2 session (4 vCPU): 2 loader workers each
 loss:

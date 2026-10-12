@@ -6,5 +6,6 @@ experiment_id: SA-14
 seed: 1
 model:
   variant: A3
+  chan_input: norm   # QĐ-08: channel branch reads the norm1 output; "raw" (block input) diverged in pilot V1/357437244
 loss:
   lambda_map: 0.1

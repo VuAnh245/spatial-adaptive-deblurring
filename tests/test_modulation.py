@@ -381,3 +381,77 @@ def test_param_match_real_config():
     assert abs((n_params(m) - n_params(base)) - extra) / extra <= 0.05
     g_plus, g_map = _conv_gmacs(m), _conv_gmacs(ref)
     assert g_plus <= 1.10 * g_map, (g_plus, g_map)
+
+
+def test_a3_channel_branch_reads_normalised_feature():
+    """QĐ-08: with chan_input='norm' (default) the channel branch sees norm1(inp), whose channel mean is ~0 at
+    every pixel at init; 'raw' (original A3, diverged in pilot V1/357437244) sees the unnormalised block input."""
+    import pytest
+    from spatial_deblur.modulation.variants import apply_model_options
+
+    torch.manual_seed(0)
+    x = torch.rand(1, 3, 32, 32) * 50
+    seen = {}
+    for mode in ("norm", "raw"):
+        m = apply_model_options(build_variant("A3", TINY), {"chan_input": mode})
+        h = m.chan["enc0"].register_forward_hook(lambda mod, inp, out, mode=mode: seen.__setitem__(mode, inp[0]))
+        m(x)
+        h.remove()
+    assert seen["norm"].mean(1).abs().max() < 1e-4
+    assert seen["raw"].mean(1).abs().max() > 1e-2
+    assert build_variant("A3", TINY).chan_input == "norm"
+    with pytest.raises(ValueError):
+        apply_model_options(build_variant("A3", TINY), {"chan_input": "other"})
+
+
+def _fail_fast_run(tmp_path, loss_fn):
+    from torch.utils.data import DataLoader
+    from spatial_deblur.engine.trainer import Trainer
+
+    m = build_variant("A0", TINY)
+    _nonzero_residuals(m)
+    tr = Trainer(m, loss_fn, DataLoader(_Pairs(), batch_size=2), tmp_path, lr=1e-3, iterations=200, warmup=1,
+                 amp=False, log_every=1, ckpt_every=2, device="cpu", fail_fast_nonfinite=True)
+    return tr, tr.fit()
+
+
+def test_trainer_fail_fast_stops_before_the_bad_update(tmp_path):
+    """QĐ-08: the first non-finite loss stops the run BEFORE optimizer.step: the weights in memory stay finite,
+    last.pth keeps step 4, event aborted_nonfinite with attempt 5 (train.py exits 3)."""
+    import json
+
+    calls = {"n": 0}
+
+    def loss_fn(model, batch):
+        calls["n"] += 1
+        loss, parts = _l1(model, batch)
+        return (loss * float("nan") if calls["n"] > 4 else loss), parts
+
+    tr, ok = _fail_fast_run(tmp_path, loss_fn)
+    assert ok is False and tr.abort_reason == "nonfinite_loss" and tr.step == 4
+    assert all(torch.isfinite(p).all() for p in tr.model.parameters())
+    assert torch.load(tmp_path / "last.pth", map_location="cpu", weights_only=False)["step"] == 4
+    ev = [json.loads(x) for x in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert [e["event"] for e in ev] == ["ckpt", "ckpt", "aborted_nonfinite"]
+    assert ev[-1]["attempt"] == 5 and ev[-1]["optimizer_step_skipped"] is True and not (tmp_path / "final.pth").exists()
+
+
+def test_trainer_fail_fast_on_nonfinite_gradient_with_finite_loss(tmp_path):
+    """A finite loss whose gradient is NaN (d sqrt(z)/dz at z = 0, times 0) is also stopped before the update."""
+    import json
+
+    calls = {"n": 0}
+
+    def loss_fn(model, batch):
+        calls["n"] += 1
+        loss, parts = _l1(model, batch)
+        if calls["n"] > 4:
+            z = (next(model.parameters()) * 0).sum()
+            loss = loss + 0.0 * torch.sqrt(z)  # value unchanged and finite, gradient NaN
+        return loss, parts
+
+    tr, ok = _fail_fast_run(tmp_path, loss_fn)
+    assert ok is False and tr.abort_reason == "nonfinite_grad" and tr.step == 4
+    assert all(torch.isfinite(p).all() for p in tr.model.parameters())
+    ev = [json.loads(x) for x in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert ev[-1]["event"] == "aborted_nonfinite_grad" and ev[-1]["loss_finite"] is True

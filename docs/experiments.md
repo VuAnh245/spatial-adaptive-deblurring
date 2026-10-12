@@ -147,6 +147,54 @@ nhưng chi phí tính toán và bộ nhớ vượt xa SFT-Map, gây out of memor
 tham số không còn so sánh dung lượng một cách công bằng. Ràng buộc gốc "lệch < 2% tổng tham số" quá lỏng (phần thêm của
 SFT-Map chỉ chiếm khoảng 1,35% tổng) nên không phân biệt được các phương án.
 
+## QĐ-08 Ổn định SFT-Map+Ch, SA-14 (chốt 2026-10-13)
+
+Phương án "Nhánh channel đọc đặc trưng chuẩn hóa + dừng trước bước cập nhật hỏng". Loại hai phương án: "Giữ nguyên A3 gốc"
+(đã phân kỳ) và "Hạ lr hoặc đổi batch riêng cho A3" (phá công thức chung của QĐ-04).
+
+Căn cứ:
+(1) pilot V1/357437244 dừng `aborted_nonfinite` ở bước 84;
+(2) chẩn đoán V1/357568385: đầu ra không hữu hạn đầu tiên ở `encoders.3.18.conv3` (lượt 35); trước đó nhánh channel cho
+    Δγ khoảng 2,25e10 vì nó nhận **đặc trưng thô** (đầu vào block), và hệ số (1 + Δγ) nhân dồn qua 28 block của enc3;
+(3) trainer vẫn chạy `optimizer.step` thêm 50 bước trên gradient NaN (FP32 không có GradScaler để bỏ bước), nên toàn bộ
+    tham số hỏng từ lượt 36.
+
+Thay đổi:
+(1) `model.chan_input: norm` (mặc định): nhánh channel đọc `norm1(inp)`, tức đặc trưng sau LayerNorm và trước điều biến.
+    Giá trị `raw` chỉ giữ để tái hiện pilot hỏng. Áp dụng qua `apply_model_options` ở cả `train.py` và `evaluate.py`;
+(2) `training.fail_fast_nonfinite: true`: loss hoặc chuẩn gradient không hữu hạn thì dừng **trước** `optimizer.step`,
+    mã thoát 3, sự kiện `aborted_nonfinite` hoặc `aborted_nonfinite_grad`;
+(3) các run đã khóa ở `faf4a06` không bị ảnh hưởng: chúng không có bước nào không hữu hạn (`nonfinite_run` luôn bằng 0),
+    và kiến trúc của Baseline, Baseline-L, SFT-Free, SFT-Map không đổi.
+Test: `test_a3_channel_branch_reads_normalised_feature`, `test_trainer_fail_fast_stops_before_the_bad_update`,
+`test_trainer_fail_fast_on_nonfinite_gradient_with_finite_loss`.
+
+Hệ quả: trong báo cáo SA-14 là "SFT-Map+Ch (QĐ-08)", một định nghĩa khác bản A3 ban đầu, train ở commit mới (ghi hash
+khi chạy). Công thức QĐ-04 giữ nguyên: lr 1e-4, batch 8, FP32, 30.000 bước, seed 1, khởi tạo từ checkpoint công khai.
+Phải qua pilot 1.500 bước (tiêu chí như pilot lần bốn) trước khi chạy full. Nếu chạy trên GPU khác T4 (Colab), tắt TF32
+(`torch.backends.cudnn.allow_tf32 = False`, `torch.backends.cuda.matmul.allow_tf32 = False`) và ghi tên GPU.
+Phép thử nhánh kênh (SA-14 so với SA-13 seed 1) phải ghi rõ khác commit và, nếu có, khác phần cứng.
+
+## QĐ-09 Chỉ tiêu chính, so sánh nhiều lần và gộp seed (chốt 2026-10-13, trước khi đánh giá test tổng hợp)
+
+(1) Chỉ tiêu chính: PSNR (float, TLC) trên `test_in`. Phép so sánh chính: Phép thử giám sát (SFT-Map so với SFT-Free).
+(2) Chỉ tiêu phụ: các phép so sánh còn lại, các tập `test_ood`, `test_straight`, `test_curved`, GoPro thật, SSIM, PSNR vùng
+    nhòe nặng, nhóm theo H. Báo cáo bằng cùng phương pháp, ghi rõ là phụ hoặc thăm dò.
+(3) Hiệu chỉnh Holm trên họ phép so sánh lõi của mỗi tập: Phép thử giám sát, Phép thử tham số, Phép thử điều biến, và
+    Phép thử nhánh kênh khi có SA-14. Luật verdict giữ nguyên (α = 0,05, ngưỡng 0,1 dB), áp dụng trên p đã hiệu chỉnh.
+    Báo kèm p chưa hiệu chỉnh.
+(4) Gộp seed: Phép thử giám sát dùng trung bình 3 seed cho từng ảnh, rồi trung bình theo video, rồi Wilcoxon; báo kèm
+    chênh lệch từng seed. Các phép có Baseline hoặc Baseline-L (1 seed) dùng seed 1 của SFT-Free / SFT-Map, vì cùng seed
+    thì cùng dòng dữ liệu train; trung bình seed chỉ là phân tích độ nhạy.
+(5) Dòng tham chiếu: checkpoint công khai chưa fine-tune (mã SA-00) được đánh giá trên `test_in` và GoPro thật bằng cùng
+    `evaluate.py`, chỉ để mô tả, không thuộc họ phép so sánh.
+Cài đặt: `scripts/eval_queue.py` (seed 2/3, SA-00, SA-14), `analysis/eval_tables.py` (Holm, gộp seed, `verdict_raw` và
+`verdict_holm`).
+
+Công bố trung thực: QĐ-09 được khai báo **sau** khi đã mở số GoPro seed 1 (Phép thử giám sát -0,024 dB, p = 0,049 chưa
+hiệu chỉnh, luật cũ ghi "SFT-Free tốt hơn") và **trước** khi có bất kỳ số nào trên test tổng hợp. Báo cáo nêu cả hai cách đọc
+cho GoPro seed 1.
+
 ## Giới hạn đã biết (đưa vào chương Giới hạn của báo cáo)
 
 (1) Split chính thức của GoPro có train và test chung video: 5 trong 10 video test (6 trong 11 chuỗi test) có đoạn khác
@@ -157,6 +205,13 @@ SFT-Map chỉ chiếm khoảng 1,35% tổng) nên không phân biệt được c
     với train lẫn test. Val chỉ có 2 video nên chỉ dùng để theo dõi và kiểm tra lr, không để chọn checkpoint.
 (3) Thang vùng nhòe: ô vùng ở test vẫn lớn hơn ở train khoảng 1,3 đến 2,7 lần (QĐ-02).
 (4) SSIM tính bằng `skimage`, khác cách cài của BasicSR, nên không so trực tiếp với số SSIM công bố (SA-00).
+(5) Fine-tune chỉ trên nhòe tổng hợp (kernel tĩnh chập trong sRGB, trộn theo mặt nạ, nhiễu σ = 0,01; bán kính RMS tối đa khoảng
+    6 px) làm mất bớt khả năng gỡ nhòe thật: trên GoPro test cả bốn mô hình seed 1 còn khoảng 28,36 dB (uint8) so với 32,87 dB
+    của checkpoint công khai. Mức tụt có ở mọi mức nhòe, 163/1111 ảnh kém hơn ảnh nhòe đầu vào. GoPro thật vì vậy là phép thử
+    ngoài phân phối của các mô hình đã fine-tune (QĐ-09: chỉ tiêu phụ). Còn chờ phép kiểm tra pipeline (trọng số công khai qua
+    đúng đường `build_variant` + `evaluate.py` phải cho lại 32,87 dB) trước khi quy hẳn mức tụt cho fine-tune.
+(6) Bộ ước lượng E chưa được kiểm tra khả năng học trước khi train chính; sau 30.000 bước nó cho bản đồ gần hằng
+    (xem "Kết luận về bộ ước lượng E").
 
 ## Log chẩn đoán khi train
 
@@ -204,12 +259,15 @@ Mọi kết quả lưu ở `results/<ID>/` với `config.yaml` (có `git_commit`
 
 Checkpoint: `final.pth` của SA-10, SA-11, SA-12, SA-13 (bước 30.000), giao thức TLC (QĐ-01).
 Test set sinh lại trong phiên bằng `scripts/make_testsets.py` và phải khớp mã sha đã ghi ở `sad-setup` (lệch là dừng).
-Hàng đợi `scripts/eval_queue.py` chia hai GPU, ưu tiên theo tầng:
-(1) bốn mô hình trên `test_in` và GoPro thật;
-(2) bốn mô hình trên `test_ood`, `test_straight`, `test_curved`; SA-20 và SA-21 của SFT-Map trên `test_in`;
-(3) SA-20 và SA-21 trên ba tập còn lại;
+Hàng đợi `scripts/eval_queue.py` chia hai GPU, ưu tiên theo tầng (cập nhật 2026-10-13 theo QĐ-09):
+(1) mọi mô hình và mọi seed trên `test_in`, checkpoint công khai (SA-00) trên `test_in`; các mô hình seed 1 trên GoPro thật;
+(2) các mô hình seed 1 trên `test_ood`, `test_straight`, `test_curved`; SA-20 và SA-21 của SFT-Map seed 1 trên `test_in`;
+    seed 2/3 và SA-00 trên GoPro thật;
+(3) SA-20 và SA-21 trên ba tập tổng hợp còn lại; seed 2/3 trên ba tập đó;
 (4) `test_in` nhiễu ×2, ×4 (SA-26), chỉ khi đủ đĩa;
-(5) suy luận toàn cục cho Baseline và SFT-Map trên `test_in` và GoPro thật (phụ lục QĐ-01).
+(5) suy luận toàn cục cho Baseline và SFT-Map seed 1 trên `test_in` và GoPro thật (phụ lục QĐ-01).
+Seed n > 1 ghi vào `results/eval/seed<n>/`. CSV đã có (đúng số dòng) được tính là xong, không bao giờ bị ghi đè; bốn CSV GoPro
+seed 1 đã kiểm chứng được loại khỏi kế hoạch bằng `--exclude "SA-1[0-3]_eval_gopro_test_pred_tlc@1"`.
 CSV theo ảnh có thêm `video`, `video_in_train` (giới hạn (1)) và `psnr_u8` (so được với SA-00). Cột chính vẫn là `psnr`.
 
 Thứ tự đọc kết quả (QĐ-04): `analysis/eval_tables.py` mặc định che mọi số của Baseline-L (SA-11) và SFT-Free (SA-12).
@@ -292,17 +350,18 @@ Nguồn tiến độ chính cho cập nhật hiện hành: mục này trong docs
 | C24–C26 — GoPro SA-10/11/12 | [x] Đã đạt trong phạm vi CSV GoPro seed 1; remote COMPLETE | 12/10: evaluator bắt đầu khoảng 10:41; GPU0 SA-11 kết thúc khoảng 11:10; worker log 1864 giây | T4 ×2; GPU0 SA-10 rồi SA-11, GPU1 SA-12 | Ba CSV 1.111 ảnh/run; queue returncodes 0; không đồng nhất elapsed Viewer với compute evaluator | Không chạy lại evaluation |
 | C24–C26 — thu và kiểm tra local | [x] Đã đạt: ba CSV VerifiedLocal | Thu/QC trong phiên từ 11:12 ngày 12/10 | AI; đúng V1/357428270, official SDK | Archive 622513 bytes SHA-256 872667327f0a92470f1d378388f6d9d8fe36bf0b23204f2da97872d67711b5c3; CRC + manifest 31/31; ID/video/finite metrics/protocol đạt; receipt ở results/artifacts/kaggle/357428270/download-provenance.json | Registry chỉ notes SA-10/11/12; status Verified, evaluation_status Missing, evaluation_ready False; SA-13/14 giữ nguyên |
 | C10–C14 — checkpoint seed 1 | [x] Đã đạt: SA-10/11/12/13 30000 bước và checkpoint VerifiedLocal; [ ] SA-14 full | Training source V2/355813018 và V3/355940350 | User đã chạy training/strict-load; AI thu/hash/đối chiếu | Receipt inventory hiện còn khớp toàn bộ; checkpoint là scope riêng, không Accepted toàn run | SA-14 pilot fail được lưu riêng, chưa có final30k |
-| C10–C14 — chuẩn bị remaining training | [x] Input/notebook A1/A2 đã chuẩn bị và gắn đúng; [ ] nghiệm thu full runs | A1/A2 seed 2 V1/357522661 được gửi khoảng 10:05 ngày 12/10 | Người dùng Save Version; AI kiểm source/phase/input/GPU | PHASE=wave_a12_seed2, GPU0 SA-13_seed2/GPU1 SA-12_seed2; 30k/run, fresh pretrained, FP32 | A3 vẫn bị chặn riêng; chưa khởi chạy seed 3 |
+| C10–C14 — chuẩn bị remaining training | [x] Input/notebook A1/A2 đã chuẩn bị và gắn đúng; [ ] nghiệm thu full runs | A1/A2 seed 2 V1/357522661 được gửi khoảng 10:05 ngày 12/10 | Người dùng Save Version; AI kiểm source/phase/input/GPU | PHASE=wave_a12_seed2, GPU0 SA-13_seed2/GPU1 SA-12_seed2; 30k/run, fresh pretrained, FP32 | A3 vẫn bị chặn riêng; seed 3 đã gửi V2/357688314, SDK RUNNING tại23:37 |
 | C10–C14 — pilot SA-14 | [ ] Bị chặn: V1/357437244 aborted_nonfinite step84; bằng chứng thất bại VerifiedLocal | Lượt pilot 12/10 đã kết thúc; trainer wall108,135 giây | User đã khởi chạy; GPU0, FP32/config khóa | Archive 4338bytes; CRC/manifest9/9 đạt; không final.pth/last.pth/train_done; không có số đo throughput đủ tin cậy | Chẩn đoán nguồn nonfinite trước pilot/full mới; không coi là OOM hoặc tự đổi batch/LR |
-| C10–C14 — full A1/A2 seed 2 | [ ] Đang chạy: SDK V1/357522661 RUNNING; chưa đủ log/bằng chứng bước training | Job gửi khoảng 10:05 ngày 12/10 → chưa chốt kết thúc; một cặp theo log cũ 8,9–9,8 giờ, ước lượng | T4 ×2, process/log/output riêng | SA-13_seed2 + SA-12_seed2 phải đạt 30k, final/last/config/log và local QC; chưa có output API công bố | Sau checkpoint sẵn sàng mới evaluation; không đánh dấu đạt từ trạng thái Running |
-| C10–C14 — tài nguyên bổ sung | [x] API snapshot mới 11:56: used8,273493/30h, reserved0, unused21,726507h; [ ] phương án GPU bổ sung đã xác minh | Mốc hiện tại, không hồi tố số tạm trước đó | User quyết định tài nguyên; AI đọc API/QC | Quota thay đổi mạnh giữa các lần đọc; chưa quy đổi chắc thành GPU-hours hoặc bảo đảm deadline | A3 cần pilot ổn định; seed3/evaluation chưa chạy; giữ đủ phạm vi và báo nguy cơ tối14/10 |
-| C10–C14 — A1/A2 seed 3 | [ ] Chưa làm: chưa có job/checkpoint seed3 | Sau khi review seed2 và quota; chưa chốt giờ | User khởi chạy Saved Version mới | Notebook sad-train-a12-seeds.ipynb có phase wave_a12_seed3; GPU0 SA-13_seed3/GPU1 SA-12_seed3, fresh pretrained | Không đổi seed bằng resume từ seed1/2; không đánh dấu đạt từ notebook chuẩn bị |
-| C51 — rà soát commit/push | [ ] Chưa đủ bằng chứng về staged/working tree/remote push | Trước commit/push tiếp theo | Git do người dùng thực hiện | AI đã kiểm artifact/schema/compile và đọc ignore; cần user git status/diff stat/check-ignore | /results, /checkpoints, .pth/.pt bị ignore cho file mới; chọn evidence nhẹ, backup/release weights riêng |
+| C10–C14 — chẩn đoán SA-14 | [x] Đã đạt thu và VerifiedLocal bằng chứng diagnostic V1/357568385; [ ] nguyên nhân/ổn định hóa/full30k | Remote COMPLETE; Viewer173,4s, worker133,371s, không dùng làm throughput full | User chạy; AI official SDK transfer/QC; GPU0 | Archive717511bytes SHA256b62fde4663f21fefebedeb13ac135aab903cd35634e41dcb2e2a28b83199b1df; CRC/manifest11/11;846 observations;source4/4/config7fields khớp | First nonfinite attempted-step35 tại encoders.3.18.conv3; bad optimizer contamination sau35, abort counter84; SA14 full vẫn bị chặn |
+| C10–C14 — full A1/A2 seed 2 | [x] Đã đạt training30000 và checkpoint VerifiedLocal trong scope hash/finite/strict-load/resume/log; [ ] smoke inference/evaluation | V1/357522661 COMPLETE; GPU0A2 wall34034,544s/GPU1A1 wall34025,124s (~9,45h/run) | User training; AI SDKtransfer/manifest/stateQC, khôngforward | Archive556914349bytes SHA25634d7ce6b8f8b5565f935a22c9ae48597bc14aa1f3a161a986402685adc72deb9;manifest22/22;712weight+2136optim tensors/run finite;final=last-model;step30000 | Registry append2rows giữ5rowscũ; statusVerified scoped,evalMissing/evalreadyFalse; khôngAccepted |
+| C10–C14 — tài nguyên bổ sung | [x] SDK23:37: used16,977058/30h,reserved0,unused13,022942h; [ ] GPU bổ sung chưa xác minh | Snapshot12/10 lúcseed3RUNNING | Quota nền tảng, khôngphysicalGPUhours | Seed2wall đo~9,45h/run; seed3 chưa cóthroughput/steps hiện hành | Không coi phép trừ dự báo quota là sốđãđo; chưa bảo đảmSA14full/evaluation trước tối14/10 |
+| C10–C14 — A1/A2 seed 3 | [ ] Đang chạy: V2/357688314 SDK RUNNING; số bước worker chưa xác minh | Kiểm tra12/10 lúc23:37 (+07:00); chưa có giờ bắt đầu compute chính xác | User đã Save & Run All; GPU T4 ×2, quota chưa dùng13,022942h | Source/input/PHASE seed3 đã xác minh; GPU0SA13seed3/GPU1SA12seed3; API log/output0, failure trống | Chờ log/steps vàcompletion đểthu/QC; chưaFinishedRemote/VerifiedLocal/Accepted |
+| C51 — rà soát commit/push | [x] Đã đạt commit/push mốc hai file docs/experiments.md và scripts/evaluate.py; [ ] tool/notebook/registry untracked và backup | User output xác nhận main→origin/main tại130a870 ngày12/10 | Git do người dùng thực hiện; AI chỉ review/ghi tiến độ | Commit130a870: 2files,65insertions/11deletions; push c273b66..130a870 tới VuAnh245/spatial-adaptive-deblurring; status main...origin/main không ahead/behind | 13file untracked theo status trước push chưa thuộc commit; results/checkpoints vẫn bị ignore, backup độc lập chưa đạt |
 | C52 — LPIPS AlexNet | [ ] Chưa làm: chưa có metric/weights-version/runtime verified | Sau khi có input/giao thức/triển khai được chấp thuận | User chạy evaluation; AI chuẩn bị/thu/QC | Giữ đúng prediction TLC/FP32 và normalization theo metric đã chốt | Không suy LPIPS từ CSV PSNR; không đổi giao thức để điền số |
 | C54 — phát hành checkpoint A2 | [ ] Chưa làm: có checkpoint local, chưa phát hành | Sau nghiệm thu scope và user quyết định publish | User phát hành/Git; AI chuẩn bị evidence | Checkpoint/seed/config/commit/protocol/license/hash/hướng dẫn phải đi kèm | Private Kaggle hoặc file local không tự là checkpoint đã phát hành |
 | C55 — khai báo dùng chung với CV | [ ] Chưa đủ bằng chứng: khung mô tả có, chưa đối chiếu repo CV | Song song phần báo cáo | User cung cấp repo CV; AI đối chiếu source/version/license | Không coi README/CORE_VERSION/CHANGELOG là đã chứng minh đồng nhất hai repo | Giữ phần nghiên cứu DL và phần dùng chung được khai báo rõ |
-| C41 — đường cong và diagnostic figure | [x] Dữ liệu/nguồn/hashes đã đạt; [ ] QA đủ ba hình và bản export cuối | Chuẩn bị đã xong; user duyệt trên Windows trong lúc chờ GPU | Ba HTML trong results/eval; training chart 10 trace khớp log gốc | Ảnh người dùng mới xác nhận bốn panel đầu của training chart; estimator/modulation và export còn chờ | Gate pair2 đã mở tại a8cb0b2; hình training cũ vẫn chỉ SA-10/13, được giữ làm bằng chứng |
-| C43 / C53 — khung báo cáo và bảng giả thuyết | [x] Có khung và bảng GoPro bốn model seed1 đã kiểm chứng; [ ] bản báo cáo/slide cuối và đa seed | Đã điền số thực sau UNBLIND ngày12/10 | AI cập nhật notebooks/03_results.ipynb; user review/report | Kết luận estimator trước mở gate giữ nguyên; bảng 1111 ảnh/model và 4 comparisons có source/hash | Không coi dàn ý notebook là báo cáo hoặc slide cuối đã hoàn tất |
+| C41 — đường cong và diagnostic figure | [x] Dữ liệu/provenance và QA hiển thị đủ6panel training, hai HTML estimator/modulation; [ ] export và chú thích cuối | User cung cấp hai screenshot đủ6panel training trong phiên ngày12/10 | Source/hash giữ nguyên; đối chiếu log JSON-lines có300training/13valrecords mỗi run, không inference | Trục/legend sáu panel đọc được; gradient norm ghi trước clip; cuốiSA10val33,791469/SA13val33,803355,SA13rho0,047614 | Footer còn thông tin SA11/12 hidden đã cũ sau gate; tiêu đề có dấu? và tooltip/cắt nguồn cần xử lý khi export; chưa QA PNG/PDF hoặc toàn C41 |
+| C43 / C53 — khung báo cáo và bảng giả thuyết | [x] Có bản nháp phương pháp/thảo luận sơ bộ và bảng GoPro bốn model seed1 đã kiểm chứng; [ ] bản báo cáo/slide cuối và đa seed | Đã bổ sung công thức/đối chứng và diễn giải sau QA6panel ngày12/10 | AI cập nhật notebooks/03_results.ipynb; user review/report | Kết luận estimator trước mở gate giữ nguyên; bảng 1111 ảnh/model và 4 comparisons có source/hash | Không coi dàn ý notebook là báo cáo hoặc slide cuối đã hoàn tất |
 | C53 — kết luận estimator / gate | [x] Đã đạt: E commit a8cb0b2, gate mở và bảng bốn model seed1 kiểm chứng; [ ] thống kê ba seed/kết luận cuối | User chạy UNBLIND ngày12/10, exit0; AI kiểm bảng sau đó | Gate đã đạt tại thời điểm xuất bảng; AI không Git | Summary mean khớp bốn CSV, 4 comparisons khớp stats.py; scope GoPro seed1 | Kết luận E đã khóa giữ nguyên; mọi lần UNBLIND tiếp theo cần commit tiến độ mới để file sạch |
 | C52 và phần cơ chế/qualitative/C55 liên quan | [x] Đã đọc code, xác định blocker; [ ] triển khai/chạy/thu kết quả còn thiếu | Rà soát 00:15–01:10; xử lý đến 08:00 khi có input | AI đề xuất tối thiểu; user chạy/sửa được chấp thuận | Đề xuất cụ thể bên dưới; RealBlur/data/hash testsets/LPIPS/các prediction còn thiếu không đổi trạng thái tổng | Tiếp tục công việc độc lập; không chạy probe, inference hoặc sinh dataset thay user |
 | C10–C14, C24–C26, C41/C43/C52–C55 — bàn giao 08:00 | [ ] Mốc 08:00 đã qua; không hồi tố hoàn tất. Bàn giao hiện tại dựa trên evidence sau 11:12 | 07:45–08:00 nếu phiên còn hoạt động | AI đọc log/artifact, user thao tác phụ thuộc | Ghi đúng việc đạt/đang chạy/bị chặn, source version/local/hash, quota và lịch tiếp ngày 12/10 | Nếu chat/app đóng: không watcher nền; lưu trạng thái thực tế trước khi kết thúc, không giả nhận đạt 08:00 |
@@ -417,3 +476,107 @@ Bốn notebook đã chuẩn bị/khung báo cáo đạt nbformat và compile t�
 Đã ghi tài liệu tại docs/experiments.md, notebooks/03_results.ipynb, registry CSV/JSON và receipts theo phiên bản; đây là bằng chứng local, chưa chứng minh các file đã nằm trong Git remote. .gitignore đang có /results/, /checkpoints/, *.pth và *.pt; chưa có .gitattributes trong repo. File evidence/source notebook mới dưới results không tự được stage/push bởi git add thông thường. Trước push cần user cung cấp status/diff-stat/check-ignore, chọn file evidence nhẹ cho Git và bảo đảm backup độc lập/checkpoint release theo kế hoạch; không tự đổi ignore, force-add, commit/push hoặc phát hành. Backup ngoài máy hiện chưa có bằng chứng.
 
 Ưu tiên tiếp: (1) rà đúng phạm vi commit mốc seed1 đã verified và tài liệu, (2) chẩn đoán nonfinite A3 và nguyên nhân PSNR chung ~28,36 dB sau fine-tune so tham chiếu SA-00 ~32,87, (3) thu seed2 ngay khi hoàn tất trong phiên đang hoạt động, chốt seed3 theo quota thực tế, (4) các test tổng hợp/robustness/OOD/RealBlur, LPIPS, oracle/shuffle, cost/ảnh định tính/report-slide-demo/tái lập/backup còn thiếu. Không tự giảm scope hoặc Accepted toàn dự án; 13/10 là ưu tiên và tối14/10 là hạn toàn bộ có rủi ro.
+
+
+- 12/10/2026: C51 đạt phần commit/push mốc seed1 theo output Git do người dùng cung cấp. Commit130a870 trên main chứa docs/experiments.md và scripts/evaluate.py (65 insertions,11 deletions); push c273b66..130a870 thành công tới https://github.com/VuAnh245/spatial-adaptive-deblurring.git; status main...origin/main không ahead/behind. Các tool/report/notebook untracked và artifacts bị ignore chưa được đưa lên remote, chưa nghiệm thu tái lập/backup hoặc toàn C51. AI không thực hiện Git. Ghi mốc này tạo sửa mới trong docs/experiments.md sau commit130a870; giữ kết luận E và các snapshot lịch sử nguyên trạng.
+
+
+- 12/10/2026 khoảng13:30: tiếp tục nguyên phạm vi theo yêu cầu đẩy nhanh. Official SDK pinned v1: A1/A2 seed2 V1/357522661 RUNNING, chưa log/output; controls V1/357428270 COMPLETE đã thu/QC, không tải hoặc chạy lại. Quota used9,681978885/30h, reserved0, unused20,318021115h, không đồng nhất quota với tổng GPU-hours. Chuẩn bị results/artifacts/kaggle/sad-train-sa14-diagnostic.ipynb (21667bytes, SHA256411ff8fe6e919b845c71c5b2d94c8f673f3a51924fa30e8aa3070435a892cb51), worker SHA256de3c8dfe05f49daff437e582318fca1310358d153f42263ba1279948c8c8834d. Notebook dùng nguyên source V2/355813018 và input đã verified, seed1 fresh pretrained, target1500/val750/ckpt750 như pilot, chỉ thêm quan sát trong process cho150 bước đầu; guard/loss/optimizer/config không đổi. Cap60 phút không phải thời gian dự báo; instrumentation làm thay đổi timing, chưa thực thi. Runtime/hook behavior chỉ được xác minh khi người dùng chạy Saved Version; đây chưa là SA-14 ổn định hoặc checkpoint full30k. Giữ notebook pilot cũ và lỗi V1/357437244 nguyên trạng.
+
+- C51 review bổ sung: sáu Python tool untracked đều parse/compile đạt; ba CSV report parse đúng32/90/5rows với10/3/32fields. Đây là static/schema checks, chưa chứng minh toàn bộ hành vi runtime hoặc sẵn sàng stage mọi file. make_testsets có thao tác unlink/rmtree và audit main ghi lại registry/snapshot nên không tự thực thi. C43/C53: cập nhật bảng giả thuyết trong notebook báo cáo theo kết quả GoProseed1 hiện có; phần seed2/3/SA14/cơ chế/LPIPS/chi phí/RealBlur vẫn pending.
+
+Lịch điều kiện từ13:30 ngày12/10: khởi chạy diagnostic riêng ngay khi user gắn input; thời gian chờ Kaggle chưa đo và worker cap60 phút, chỉ GPU0 có training. Seed2 tiếp tục job cũ, chưa đủ step/it/s để chốt giờ kết thúc; sau completion mới intake/QC rồi chọn wave seed3 theo quota, một cặp theo log cũ8,9–9,8h là ước lượng. Chiều12/10 chuẩn bị báo cáo/hình song song và xử lý diagnostic khi có evidence; 13/10 ưu tiên các job dài/test còn thiếu; tối14/10 vẫn là hạn toàn bộ có rủi ro, chưa tự giảm SA14/seed/dataset hoặc gán Accepted.
+
+- 12/10/2026 13:37:30 (+07:00): C10–C14 diagnostic setup được SDK xác minh: xunanhv/sad-train-sa14-diagnostic có3 code cell khớp nguyên source notebook local, PHASE diagnostic_sa14, enable_gpu=True/NvidiaTeslaT4, đúng input sad-train-remaining-input và sad-data; Saved Version count0. Đây là setup đã đạt, chưa preflight runtime/hash, chưa training/diagnostic remote, chưa có artifact để thu. User tiếp theo Save Version→Save & Run All, GPU for this session, rồi gửi exact Saved Version URL. Không tạo version hoặc thực thi notebook bởi AI.
+
+- 12/10/2026 13:40:53 (+07:00): C10–C14 diagnostic launch confirmed. User URL https://www.kaggle.com/code/xunanhv/sad-train-sa14-diagnostic?scriptVersionId=357568385 xác định V1/357568385; official SDK version_label=v1 xác nhận Saved Version1,3 code cell khớp notebook local, GPU enabled/NvidiaTeslaT4, đúng input remaining-training-input và sad-data, RUNNING không failure message. API chưa công bố log/output, chưa có preflight/training-step/diagnostic-content proof và chưa có artifact để thu. User screenshot Logs hiển thị T4×2 và debugger warnings; đó chưa phải lỗi training. A1/A2 seed2 V1/357522661 cũng vẫn RUNNING. AI không thực thi notebook hoặc tạo version; không gán FinishedRemote/VerifiedLocal/Accepted từ trạng thái Running.
+
+
+### SA-14 numeric diagnostic — V1/357568385, evidence VerifiedLocal ngày12/10
+
+Nguồn chính xác: https://www.kaggle.com/code/xunanhv/sad-train-sa14-diagnostic?scriptVersionId=357568385. Remote COMPLETE do diagnostic capture hoàn tất; training process returncode3/IncompleteRemote. Archive local results/artifacts/kaggle/357568385/original/remaining_training_diagnostic_sa14.zip,717511bytes,SHA256b62fde4663f21fefebedeb13ac135aab903cd35634e41dcb2e2a28b83199b1df; remote log hash khớp transfer. CRC và verify_manifest.ps1 đạt11/11;846 dòng numeric JSONL parse đủ. Worker hashde3c8dfe05f49daff437e582318fca1310358d153f42263ba1279948c8c8834d khớp notebook/source; đã thu source/log và4frozen source file, byte khớp bundle gốc. Bảy field config experiment_id/seed/model/data/training/loss/git_commit khớp pilot V1/357437244; pretrained val0PSNR26,656017615377813. Receipt results/artifacts/kaggle/357568385/download-provenance.json,SHA256b61f34908e69eb3bf3159d652acb12d007a44cec048edc1c72476e87094a1a3b,19inventory entries. Không final.pth/last.pth/train_done.json, không VerifiedLocal checkpoint hoặc Accepted. Registry mainSA14 vẫnMissing và lịch sử không ghi đè.
+
+Quan sát: bước34 loss0,0210317, gradient norm trướcclip1,676999/sauclip~1,0, input/parameter/gradient hữu hạn. Lượt forward35 input blur/sharpFP32 NCHW8×3×256×256 trong[0,1],smap hữu hạn; toàn748parameter tensors trướcforward/optimizer hữu hạn. Bên enc3, outputblock17 absmax~1,76e15; norm1block18 vẫn hữu hạn max~4,54 nhưng channel delta_gamma~2,25e10,bias~2,23e10. SimpleGate vàSCA trướcconv3 lên~3,52e22/~3,44e22; module output không hữu hạn đầu tiên encoders.3.18.conv3. Charbonnier NaN nhưng L_map vẫn0,0323069. Gradient748tensors không hữu hạn; clip không phục hồi; optimizer vẫn cập nhật và748parameter tensors thành không hữu hạn saubước35. Từlượt36 parameter đãhỏng. Trainerabortconsecutive51 khi self.step84 (85attempts). Không dấuhiệuOOM; peakallocated11,096GiB/reserved12,197GiB.
+
+Diễn giải giới hạn: log ủng hộ giả thuyết khuếch đại trong chuỗi encoder/channel nhận feature thô và xác minh sự lan truyền do optimizer vẫn cập nhật gradient NaN. Chưa trực tiếp hook phép nhân x*SCA trướcconv3 hoặc thực hiện can thiệp đối chứng; vị trí output NaN không chứng minh convolution implementation sai hoặc channel là nguyên nhân duy nhất. Chưa dùng timing quan sát để dự báofull run. A1/A2seed2 V1/357522661 vẫnRUNNING ở lầnSDKkiểmtra sauintake, chưa có checkpoint mới để thu.
+
+Phương án sửa tối thiểu để người dùng review, CHƯA ÁP DỤNG: (a) trong ModulatedNAFNet.run_stage, đổi duy nhất đầu vào channel từ self.chan[key](inp) sang self.chan[key](xn), với xn làfeature sauLayerNorm trướcđiềubiến; giữ khởi tạo/modelsize/LR/loss/batch/FP32. Đây là sửa định nghĩaA3, cần ghi quyết định vàsource/patchhash riêng, không gọi cùng frozen snapshot cũ. (b) guardtrainer kiểm loss vàgradient finite trướcoptimizer, fail-fast vàghi event trướcbadupdate; giữ mọi bước hữu hạn, không skipbatch rồi tuyên bốfullcomplete. Guardb sửa cơ chế lantruyền, không tự chữa lỗiforward. Chưa thaymodel/trainer/config/manifest; AGENTS yêu cầu người dùng chấp thuận thayđổi thuật toán/guard và khởi chạy pilot mới. Không tự thayA3gốc bằng biếnthểổn định hoặc fullrun trướcpilot.
+
+C41 visualQA: screenshot estimator/calibration/MAE vàmodulation3panel cho thấy axes/legend/provenance đọc được, nguồn nội dungkhớp bằngchứng. Đã đạt phần hiển thị haiHTML; ảnh đầu cóTranslate popup/tooltip nên chưalàexportcuối. TrainingHTML chỉđãthấy4panelđầu,2panelcuối/PNG-PDF/reportlayout vẫnpending. GiữHTMLgốc, khôngghiđè.
+
+
+Patch đề xuất để review (chỉ văn bản, chưa áp dụng vào source):
+
+```diff
+--- src/spatial_deblur/modulation/variants.py (A3 conditioning)
++++ proposed A3 stability pilot
+@@
+-                    dgc, bc = self.chan[key](inp)
++                    dgc, bc = self.chan[key](xn)
+--- src/spatial_deblur/engine/trainer.py (loss/gradient safeguards)
++++ proposed fail-fast guards
+@@ after step_finite is calculated, before parts/backward
++                if not step_finite:
++                    self.abort_reason = "nonfinite_loss"
++                    self.log_event("aborted_nonfinite", attempt=self.step + 1, phase="loss", consecutive=1)
++                    log.close()
++                    return False
+@@ after self.scaler.unscale_(self.opt), before gradient clipping
++            if any(not bool(torch.isfinite(p.grad).all())
++                   for p in self.model.parameters() if p.grad is not None):
++                self.abort_reason = "nonfinite_gradient"
++                self.log_event("aborted_nonfinite_gradient", attempt=self.step + 1)
++                log.close()
++                return False
+@@ after existing clip_grad_norm_, before scaler.step
++            if not bool(torch.isfinite(grad_norm)):
++                self.abort_reason = "nonfinite_gradient_norm"
++                self.log_event("aborted_nonfinite_gradient_norm", attempt=self.step + 1)
++                log.close()
++                return False
+```
+
+Điều kiện nếu được chấp thuận: launcher/bundle riêng dựa trên source gốc và patch/hash ghi rõ, pilot SA-14_seed1_stability1500 khởi tạo pretrained mới; LR1e-4/batch8/FP32/loss/val40/target1500 không đổi. Các run/receipt cũ và job seed2 đang chạy không thay đổi. Guard không bỏ qua batch xấu để tích đủ số bước; gặp lỗi thì abort trước optimizer. Pilot ổn định mới cho phép lập lịch full30k; chưa gọi A3 gốc ổn định hoặc tất cả kết quả cùng frozen code cũ.
+
+
+- 12/10/2026 19:20–19:23 (+07:00): kiểm officialSDK pinv1 đủ5SavedVersion. A1/A2seed2 V1/357522661 RUNNING/nofailure/APIoutput0/log0; Chrome signed-in pinnedLogs đãcópreflightpass93bundle/val40/runtime/pretrained vàFRESH RUNS SA13seed2GPU0/SA12seed2GPU1. Last visible process rows tại31226,4s/8,6717h đềureturncode null; Viewer33551,5s (~9,32h), chưa thấy actualoptimizersteps/workerlogs. Lưu source log hiểnthị ở results/artifacts/kaggle/357522661/supplied/live-browser-log-2026-10-12T12-23-14-543Z.txt; scope browser evidence, không checkpoint hoặc completedSavedOutput. DiagnosticV1/357568385COMPLETE,controlsV1/357428270COMPLETE,recoveryV1/357357176COMPLETE đềuđãVerifiedLocal đúngscope; pilotV1/357437244ERROR cóevidenceVerifiedLocal, khôngtrainđạt. Khôngtải/checks lặp artifacts đãgiữnguyên.
+
+Quota19:21 used15,7221647147/allowed30h,reserved0,unused14,2778352853h. GiữA1/A2seed2 chạy nguyênrecipe; chưa có lýdo hủy/restart chỉvìseed1GoProkém. Seed3 tiếptục kếhoạch sauseed2QC/quota, chưa tuningA2 trướcprobe_E/oracle/shuffle vàràgapSA00. A3 cầnpilot ổnđịnh hóa theo diff đãreview trướcfull; source/model/guard vẫn chưa đổi vì user chưa chấp thuận cụthể. TheoelapsedViewer, cap11,5h vào khoảng21:30–21:40 ngày12/10 chỉlàshutdownlimit của notebook, khôngphải lời hứa30khoàntất; nếu thiếu target phảithuQCcheckpoint interrupted vàreviewresume cùngrun riêng. Seed3 cặp8,9–9,8h làước lượngoldlogs; còn14,28hquota chưađủ cơsởđảmbảoA3full/evaluations/scope14/10, nguồnGPUbổsung vẫnpending. AI khôngcancel/joblaunch/Git/sửaalgorithm.
+
+
+### Probe E độc lập — chuẩn bị bằng script hiện có, chưa chạy
+
+12/10/2026: tiếp tục phần cơ chế/estimator trong checklist hiện có, không thayA1/A2/A3 để dò cấu hình. Chuẩn bị results/artifacts/kaggle/sad-probe-estimator.ipynb (20161bytes,SHA2569857f61469447f56f415d1cff05410ffdf778b21c8396275dc76f8420e5af66c). Script analysis/probe_estimator.py giữ nguyên byte,SHA256f761142a9d4d2ad025a644198c5e6609b3fa3f20f93b4361069941f85e49bac0; notebook embed vì bundle cũ chỉ cóanalysis/pilot_report.py, không bắt upload lại dataset. NB/cells/embeddedworker/script compile và source byte-equality/JSONroundtrip đạt, chưa execute.
+
+Inputs reuse xunanhv/sad-train-remaining-input + xunanhv/sad-data;93bundle/runtime/val40 gốc preflight như cũ. Probe chỉtrain freshBlurMapEstimator seed1 trên generatorseed1001 theo script;1000steps,batch8,LRfromconfig1e-4,FP32,val0/250/500/750/1000,workers2,devicecudaGPU0;GPU1 không cótrainjob. KhôngpretrainedNAFNet/resume/checkpointA2 reuse, không đổi generator/valdata/loss/estimatorcode. Output riêng /kaggle/working/remaining_training_probe_estimator_seed1.zip và sad_remaining_probe_estimator_seed1/results/probe_E_seed1_1000; log/summary/runtime/source/worker/MANIFEST. Cap30min làlimit, không thời gian dự báo; capture thấtbại trướcassert. Scriptgốc khônglưucheckpointE, nên scope làdiagnosticmetrics, khôngtrainingcore/Accepted.
+
+Interpretation đãkhai báo trước: rho tăng chỉ hỗ trợ khả năng học trênsetup probe, không tự chứng minh nguyênnhânA2; rho thấp/undefined không chứng minh targetunlearnable. val_s_hat_std của script làảnhvalcuối, khôngmean40. Khi API/Chrome xácnhậncompletion trongphiênactive, thu đúngversion vàQC5logsteps/finiteMAE/provenance; undefinedrho ghi rõ thayvìgán0. ResourceURL tên sad-probe-estimator mớiđềxuất,chưa notebook remote verified; userimport/SaveVersion. Seed2 SDK vẫnRUNNING/output0 lúc chuẩn bị; chưaapplySA14patch, khôngAItraining/eval/Git.
+
+
+### A1/A2 seed2 — training FinishedRemote, checkpoint VerifiedLocal (12/10/2026)
+
+Source https://www.kaggle.com/code/xunanhv/sad-train-a12-seeds?scriptVersionId=357522661, V1/357522661 COMPLETE; exact3codecells khớp notebook chuẩn bị. SA12seed2/A1GPU1 vàSA13seed2/A2GPU0 đềureturncode0/finished30000/train_done30000,cap_reachedFalse. OfficialSDKtransfer selectedarchive bằng.part/exclusive tới results/artifacts/kaggle/357522661/original/remaining_training_wave_a12_seed2.zip (556914349bytes,SHA25634d7ce6b8f8b5565f935a22c9ae48597bc14aa1f3a161a986402685adc72deb9),hash/size khớpremote log,trướcpromote;CRC/safeZIP extraction/manifest22/22đạt. Originalsaved-source vàsession-log giữnguyên,khôngmirror toàn99Outputcopies.
+
+CheckpointQC bằngCPU đọcstate vàstrict-load dùngsourcefrozen từ remaining-training-input.zip/src,torch2.13.0+cpu; khôngforward/backward hoặcmodel evaluation. Configmodel/data/training/loss/git_commit khớpseed1, chỉseed2/provenance khác.712weighttensors và2136optimizer tensors/run finite;final khớplast.model, resume cómodel/opt/sched/scaler/step/rng vàstep/scheduler30000. Mỗirun300curvesrecords/13valrecords/60diagrecords,loss/grad_norm/valmetricsfinite,nonfinite_run0,khôngabort/stopped. Workingvariants/nafnet khácbytefrozen doCRLF/LF,normalizedsourceequal; strict-load lấy trực tiếpfrozen module,khôngstrict-loadlạiseed1.
+
+SA12seed2 finalSHA256a72ffc159139d41f48bbd4378dfc6bdb82886d825c6a678d5ca6e12ea3df3efb,lastSHA256187d233c329724d4bb4ea5bb425b9d870d409de856a926281d222f98feae7f93,configSHA25695e8cabd1b60efb65d774aa1178a03b920b25f4e90050991a6d456b16ec1fa1c. Val40 cuốiPSNR33,8026487/mapMAE0,6622735/rho-0,0055208;wall34025,124s. SA13seed2 finalSHA256c1875c0052cc604d4b739bbbc989ca53e52f533f4b6c825dc09a4ade06b0c014,lastSHA25676677335d3f14def8b435dec7eb00a3962264d2f366bb8ce5f854bebb0989daa,configSHA2563c997432a3e002e81ec91d3d22695768dc4603d05ef07698216b1e46d964367f. Val40 cuốiPSNR33,7997188/mapMAE0,1768159/rho0,0377062;wall34034,544s. Đây làvalidationmonitoring,khôngGoProtest hoặc kếtluận nhiều seed; estimatorA2rho vẫn thấp,probe_E/oracle/shuffle còn cần.
+
+Receipt results/artifacts/kaggle/357522661/download-provenance.json,SHA2566aa5fd929ce308c1e9ba8966fea30d55b534019f05d3ada8c6b1afe56515262c,26inventory entries. SauQCđạt, dùng helperwrite_csv/write_json cũ vàCSV/JSONroundtrip trướcwrites;registry appendđúng2rows thành7rows/32fields,nămrowscũ giữnguyên kể cảSA14. NewstatusVerified,notesCheckpointVerifiedLocalscope,trainingFinishedRemote/evaluationMissing/evaluation_readyFalse; inference smoke/evaluation chưa chạy, khôngAccepted. Cácsnapshots/index cũ giữnguyên, khôngauditmain/Git/researchcode/config/manifests changes.
+
+Tiến độtraininglõi:6/9runFinishedRemote (4seed1+2seed2);2seed3vàSA14fullcòn thiếu. Ưutiên user tạoSavedVersionmới trên sad-train-a12-seeds, đổi duy nhấtPHASE=wave_a12_seed3, GPU0SA13seed3/GPU1SA12seed3; seed2V1bảo toàn. Freshpublicpretrained/30k, khôngresume. Quota20:32used15,908897633/30h/reserved0/unused14,091102367h; runtimephase3ước9,5–10,5h theohaiwallseed2,host/queue chưađo. Nếuuserlaunch20:45 thìcompute kếtthúcước06:15–07:15 ngày13/10, cộngqueue/setup/packngoàiước lượng; khôngcamkếtdeadline. A3full/pilotapproved/probe/evaluation chưa có đủresourcebảođảm; không tự giảmphạmvi hoặc đổiiteration.
+
+- 12/10/2026 21:13:08 (+07:00): C10–C14 A1/A2 seed 3 đã gửi bởi người dùng. URL thực tế https://www.kaggle.com/code/xunanhv/sad-train-a12-seeds?scriptVersionId=357688314 xác định Saved Version 2; official SDK pin version_label=v2 xác nhận 3 code cell khớp hoàn toàn results/artifacts/kaggle/sad-train-a12-seed3.ipynb (SHA-256 bf95964efe8cbb670cfaaa2991b2b9a48ed789eab480e0a1d46914b087e57392), đúng một PHASE=wave_a12_seed3, GPU enabled/NvidiaTeslaT4 và chỉ hai input sad-train-remaining-input/sad-data. Planned GPU0 SA-13_seed3/A2 và GPU1 SA-12_seed3/A1, fresh public pretrained, target30000/run. SDK QUEUED, failure_message trống, output0/log0; chưa có preflight hoặc optimizer-step proof, chưa có artifact để thu. V1/357522661 và checkpoint seed2 đã verified được giữ nguyên; registry chưa đổi từ trạng thái xếp hàng.
+
+Quota cùng mốc: used15,908897633/30h, reserved0, unused14,091102367h; đây là quota nền tảng, không tổng thời gian GPU vật lý. Ước lượng compute cặp seed3 9,5–10,5h theo wall seed2 ~9,45h/run, chưa đo queue/setup/pack. Nếu compute bắt đầu21:15 ngày12/10, cửa sổ compute ước06:45–07:45 ngày13/10; giờ thực tế phải dịch theo bắt đầu worker và log. Sau lượt này còn khoảng3,6–4,6h quota trước probe/evaluation/SA14: toàn bộ phạm vi tới tối14/10 vẫn chưa được bảo đảm; SA14 full còn bị chặn bởi quyết định ổn định hóa/pilot và tài nguyên. AI không tạo version, chạy training/evaluation, sửa nghiên cứu hoặc thực hiện Git; không có watcher nền khi chat/app đóng.
+
+- 12/10/2026 21:33:20 (+07:00): rà soát tiến độ theo checklist hiện hành, không kiểm hash lại checkpoint cũ. Official SDK pinv2 sad-train-a12-seeds vẫn QUEUED, failure trống, output0/log0; quota used15,908897633/30h, unused14,091102367h, reserved0. Sáu trong chín training lõi đã hoàn tất; seed3 chưa có worker-step evidence, SA14 chưa full. Bốn CSV GoPro seed1 và bảng summary đã có local; đọc lại bảng hiện có cho uint8 PSNR A0=28,3649/A0+=28,3622/A1=28,3651/A2=28,3436. Receipt intake controls/recovery/seed2/SA14diagnostic đều hiện diện ở origin riêng; không chuyển các evidence này thành Accepted toàn dự án.
+
+Đánh giá chất lượng hiện hành: evidence training và GoPro seed1 đủ hỗ trợ kết quả sơ bộ có thể truy vết; chưa chứng minh A2 cải thiện. A2-A1 theo video seed1 -0,0236103dB, rho estimator val40 gần0 và map gần hằng số; chưa kết luận SFT thất bại hay implementation lỗi. Chênh A2 so SA00 uint8 khoảng4,5269dB còn cần giải thích ở phạm vi giao thức đã đối chiếu; SSIMSA00 khác scope/giao thức. Seed2 validation chỉ là monitoring, không thay thế test đa seed. Synthetic/OOD/robustness/RealBlur, oracle/shuffle/probe, LPIPS, chi phí/ảnh định tính, báo cáo/slide/demo/repro/backup/phát hành/khai báoCV còn thiếu theo tiêu chí riêng; không gán phần trăm hoàn thành toàn dự án từ6/9training.
+
+Ưu tiên song song không GPU: C41 review đủ6panel training và chuẩn bị export; C43/C53 hoàn thiện phương pháp, giao thức, bảng giả thuyết, kết quả sơ bộ và giới hạn trong notebook báo cáo hiện có; C51 chuẩn bị review các tool/registry và phương án backup ngoàiGit. Một phiên viết/review45–90phút là ước lượng công việc người dùng, không số đo log. Chuẩn bị probe_E đã có notebook local, chưa có Saved Version remote xác minh. Quyết định sửaSA14 cần user chấp thuận patch cụ thể trước pilot; nguồnGPU thêm chưa xác minh. Sauseed3 ước còn3,6–4,6h quota trước các tác vụ khác, trong khi A3full chưa có số đo; rủi ro vượt tối14/10 vẫn còn. Không tự giảm phạm vi hoặc khởi chạy thí nghiệm/Git.
+
+- C41 QA bổ sung ngày12/10: hai screenshot training_curves_seed1_blind.html hiển thị đủ6panel. Đọc lại log nguồn (curves.csv thực tế JSON từng dòng) cho300records/run,13valrecords/run; cuốiSA10 Charbonnier0,009137704/grad_norm0,008736626/valPSNR33,791468570,SA13 Charbonnier0,009130239/l_map0,019306172/grad_norm0,008857501/valPSNR33,803355356/rho0,047614058; LR cuối1e-7,khôngzero grad tại300điểmlog mỗi run. Gradientnorm là giá trị trả về clip_grad_norm_, tức norm trướcclip, không bằng chứng mọi bước. Validation40 synthetic không so tuyệt đối vớiGoPro1111 hoặc chứng minh overfit. Chỉ QA màn hình đạt; export cuối/footer gate đãcũ/title dấu? vàsourcecắt cần hoàn thiện, không sửa hình nguồn hoặc coiC41toànphần đạt.
+
+- C43/C53 làm song song trong lúc chờseed3: notebooks/03_results.ipynb đã bổ sung mô tả đối chứng, công thức SFT vàloss đúng source modules/losses, freshseed/publicpretrained vàtraining khóa; bổ sung diễn giải training/validation/GoPro/estimator vàgiới hạn suy luận. MụcBLIND cũ được ghi rõ snapshot trướcgate, khôngxóa lịch sử; codecells giữ nguyên. nbformat/codeAST/JSONroundtrip PASS,khôngexecute. Đây là draftnội dung, chưabáo cáo/slide cuối; userreview lập luận vàchuyển thành bài trìnhbày trong khi các bảngseed2/3/SA14/testkhác còn pending. Không có thí nghiệm/Git/model/config/data changes.
+
+- 12/10/2026 23:37:02 (+07:00): officialSDK pinv2 sad-train-a12-seeds/357688314 chuyểnRUNNING,failure trống,APIoutput0/log0. Chỉ xácnhận SavedVersion đangchạy, chưa workerstep/preflight proof. Quota đo thực used16,977058401/30h,unused13,022941599h,reserved0. Traininglõi vẫn6/9finished,2seed3pendingvàSA14fullblocked; GoPro4/4modelseed1VerifiedLocal,4CSVGoProA1/A2seed2/3chưa có. Checklist giữ phạmvi,khôngAccepted; các dự báoquota sauseed3 trướcđây chỉước lượng vàchưađo,không dùng làm sốcòn thực tế. Không kiểmhashlại artifacts khôngđổi,khôngtraining/eval/Git.

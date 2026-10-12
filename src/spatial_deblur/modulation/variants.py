@@ -27,10 +27,13 @@ from .modules import BlurMapEstimator, ChannelModulation, SpatialSFTHead
 
 class ModulatedNAFNet(NAFNet):
     def __init__(self, spatial: bool = True, channel: bool = False, detach_map: bool = False,
-                 **nafnet_kwargs):
+                 chan_input: str = "norm", **nafnet_kwargs):
         super().__init__(**nafnet_kwargs)
         self.spatial, self.channel = spatial, channel
         self.detach_map = detach_map  # SA-17: restoration gradient does not reach the estimator
+        # QĐ-08: the channel branch reads the normalised feature (norm1 output, before modulation). "raw" = the
+        # block input, the original A3 that diverged in pilot V1/357437244 (kept only to reproduce that failure).
+        self.chan_input = chan_input
         stages = {f"enc{i}": c for i, c in enumerate(self.enc_channels)}
         stages["mid0"] = self.middle_channels
         stages.update({f"dec{i}": c for i, c in enumerate(self.dec_channels)})
@@ -51,7 +54,7 @@ class ModulatedNAFNet(NAFNet):
                 if sft is not None:
                     gamma, bias = gamma * (1 + sft[0]), bias + sft[1]
                 if self.channel:
-                    dgc, bc = self.chan[key](inp)
+                    dgc, bc = self.chan[key](xn if self.chan_input == "norm" else inp)
                     gamma, bias = gamma * (1 + dgc), bias + bc
                 return gamma * xn + bias
             x = blk(x, modulate if (self.spatial or self.channel) else None)
@@ -84,6 +87,18 @@ def build_variant(variant: str, nafnet_kwargs: dict | None = None) -> nn.Module:
     if variant == "A0+":
         return build_param_matched(build_variant("A2", kw), kw)
     raise ValueError(f"unknown variant {variant}")
+
+
+def apply_model_options(model: nn.Module, m: dict) -> nn.Module:
+    """Options of the ``model`` config section that are attributes, not layers: used by train.py AND evaluate.py
+    so a checkpoint is always run the way it was trained."""
+    if isinstance(model, ModulatedNAFNet):
+        model.detach_map = bool(m.get("detach_map", False))
+        chan_input = m.get("chan_input", "norm")
+        if chan_input not in ("norm", "raw"):
+            raise ValueError(f"chan_input must be 'norm' or 'raw', got {chan_input!r}")
+        model.chan_input = chan_input
+    return model
 
 
 def n_params(m: nn.Module) -> int:

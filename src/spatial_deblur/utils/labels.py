@@ -13,14 +13,14 @@ MODEL_LABELS = {"A0": "Baseline", "A0+": "Baseline-L", "A1": "SFT-Free", "A2": "
                 "nafnet_public": "NAFNet gốc (checkpoint công khai)"}
 MODEL_NAMES = {"A0": "NAFNet gốc", "A0+": "NAFNet tăng tham số", "A1": "Điều biến tự do",
                "A2": "Điều biến theo bản đồ nhòe (mô hình đề xuất)",
-               "A3": "Điều biến theo bản đồ nhòe + kênh"}
+               "A3": "Điều biến theo bản đồ nhòe + kênh", "nafnet_public": "NAFNet gốc (checkpoint công khai)"}
 
 COMPARISON_LABELS = {("A1", "A0"): "Phép thử điều biến",
                      ("A2", "A1"): "Phép thử giám sát (chính)",
                      ("A2", "A0+"): "Phép thử tham số",
                      ("A3", "A2"): "Phép thử nhánh kênh"}
 
-EXPERIMENT_MODEL = {"SA-10": "A0", "SA-11": "A0+", "SA-12": "A1", "SA-13": "A2", "SA-14": "A3",
+EXPERIMENT_MODEL = {"SA-00": "nafnet_public", "SA-10": "A0", "SA-11": "A0+", "SA-12": "A1", "SA-13": "A2", "SA-14": "A3",
                     "SA-15": "A2", "SA-16": "A2", "SA-17": "A2", "SA-18": "A2", "SA-19": "A2"}
 EXPERIMENT_LABELS = {
     "SA-00": "Tái lập NAFNet gốc trên GoPro",

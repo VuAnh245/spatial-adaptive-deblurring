@@ -25,7 +25,7 @@ from spatial_deblur.engine.trainer import Trainer
 from spatial_deblur.models.nafnet import load_official_checkpoint
 from spatial_deblur.modulation.analysis import make_train_diag, val_metrics
 from spatial_deblur.modulation.losses import make_loss
-from spatial_deblur.modulation.variants import build_variant
+from spatial_deblur.modulation.variants import apply_model_options, build_variant
 from spatial_deblur.utils.config import load_config, validate
 from spatial_deblur.utils.seed import set_seed
 
@@ -63,6 +63,10 @@ def main() -> None:
             cfg["training"][key] = val
     validate(cfg)
     set_seed(cfg["seed"])
+    # QĐ-07/QĐ-08: true FP32 on every GPU. Ampere+ (Colab L4/A100) would use TF32 for convolutions by default;
+    # T4 has no TF32, so runs on Kaggle are unchanged.
+    torch.backends.cudnn.allow_tf32 = False
+    torch.backends.cuda.matmul.allow_tf32 = False
     m, d, t = cfg["model"], cfg["data"], cfg["training"]
     accum = int(t.get("grad_accum", 1))
     if t["batch_size"] % accum:
@@ -83,8 +87,7 @@ def main() -> None:
     cfg["provenance"] = provenance
 
     kw = {k: m[k] for k in ("width", "middle_blk_num", "enc_blk_nums", "dec_blk_nums")}
-    model = build_variant(m["variant"], kw)
-    model.detach_map = m.get("detach_map", False)
+    model = apply_model_options(build_variant(m["variant"], kw), m)  # detach_map (SA-17), chan_input (QĐ-08)
     report = load_official_checkpoint(model, m["init_checkpoint"], strict=False)
     cfg["init_load"] = {"missing": len(report.missing_keys), "unexpected": len(report.unexpected_keys)}
     if report.unexpected_keys:
@@ -113,7 +116,7 @@ def main() -> None:
                       val_every=t["val_every"], device=a.device,
                       diag_fn=make_train_diag(), diag_every=t.get("diag_every", 500),
                       val_at_start=not a.skip_val_at_start, val_floor_drop=t.get("val_floor_drop"),
-                      grad_accum=accum)
+                      grad_accum=accum, fail_fast_nonfinite=bool(t.get("fail_fast_nonfinite", False)))
     if a.resume and trainer.resume():
         # samples are indexed by position, so continue the stream instead of replaying it from index 0
         trainer.loader = DataLoader(Subset(ds, range(trainer.step * t["batch_size"], len(ds))),
@@ -129,7 +132,8 @@ def main() -> None:
         (out / "train_done.json").write_text(json.dumps({"steps": trainer.step}))
     elif trainer.abort_reason:
         print(f"ABORTED ({trainer.abort_reason}) at step {trainer.step}; last good checkpoint kept in last.pth", flush=True)
-        raise SystemExit({"nonfinite_loss": 3, "val_drop": 4, "stalled": 5, "amp_scale": 6}.get(trainer.abort_reason, 7))
+        raise SystemExit({"nonfinite_loss": 3, "nonfinite_grad": 3, "val_drop": 4, "stalled": 5,
+                          "amp_scale": 6}.get(trainer.abort_reason, 7))
     else:
         print(f"stopped at step {trainer.step}; resume with --resume", flush=True)
 

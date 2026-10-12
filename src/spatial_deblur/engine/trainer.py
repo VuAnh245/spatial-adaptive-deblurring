@@ -39,7 +39,7 @@ class Trainer:
                  diag_fn: Callable[[torch.nn.Module, str], dict | None] | None = None, diag_every: int = 500,
                  val_at_start: bool = False, max_nonfinite: int = 50,
                  val_floor_drop: float | None = None, val_floor_key: str = "val_psnr",
-                 grad_accum: int = 1, max_zero_grad_logs: int = 3):
+                 grad_accum: int = 1, max_zero_grad_logs: int = 3, fail_fast_nonfinite: bool = False):
         self.model = model.to(device)
         self.loss_fn, self.loader, self.val_fn = loss_fn, train_loader, val_fn
         self.out = Path(out_dir)
@@ -71,6 +71,11 @@ class Trainer:
         self._val_failed = False
         self.grad_accum = max(1, int(grad_accum))  # micro-batches per optimizer step (loader yields micro-batches)
         self.max_zero_grad_logs = max_zero_grad_logs
+        # QĐ-08 fail-fast (FP32 only): a non-finite loss or gradient norm stops the run BEFORE the optimizer step.
+        # Without a GradScaler nothing skips that step, so one NaN update corrupts every parameter (SA-14 pilot:
+        # 50 more updates ran on NaN gradients before the consecutive guard fired). Under AMP the scaler already
+        # skips inf/NaN steps and the consecutive guard above still applies.
+        self.fail_fast_nonfinite = fail_fast_nonfinite
 
     # ---------------------------------------------------------------- state
     def log_event(self, event: str, **fields) -> None:
@@ -186,6 +191,17 @@ class Trainer:
                 nonfinite_run = 0
             self.scaler.unscale_(self.opt)
             grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip)
+            if self.fail_fast_nonfinite and not self.use_amp:
+                grad_finite = bool(torch.isfinite(grad_norm))  # the total norm is non-finite iff any gradient is
+                if not (step_finite and grad_finite):
+                    self.abort_reason = "nonfinite_loss" if not step_finite else "nonfinite_grad"
+                    # event names: "aborted_nonfinite" as for the consecutive guard (read by pilot_report), or
+                    # "aborted_nonfinite_grad" when the loss was finite but a gradient was not
+                    self.log_event("aborted_nonfinite" if not step_finite else "aborted_nonfinite_grad",
+                                   attempt=self.step + 1, loss_finite=step_finite, grad_norm_finite=grad_finite,
+                                   optimizer_step_skipped=True)
+                    log.close()
+                    return False
             self.scaler.step(self.opt)  # skipped by the scaler when gradients are inf / nan
             self.scaler.update()
             self.sched.step()
