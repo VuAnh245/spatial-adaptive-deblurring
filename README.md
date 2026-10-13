@@ -1,7 +1,7 @@
 # Spatially Adaptive Deblurring for Non-Uniform Motion Blur
 
 **Khử nhòe thích ứng theo không gian cho ảnh nhòe chuyển động không đồng nhất**
-Đồ án môn Deep Learning - Vũ Xuân Anh (UTEHY)
+Đồ án môn Deep Learning - Vũ Xuân Anh (HYUTE)
 
 ## Câu hỏi nghiên cứu
 
