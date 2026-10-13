@@ -168,8 +168,11 @@ def _bad_pngs_one(p: Path) -> bool:
 
 
 # ----------------------------------------------------------------------------------------------- evaluation (QĐ-09/10)
-# Test sets registered by sad-checks V3 (Kaggle, numpy 2.1.3 / scipy 1.16.3, the versions pinned in this image).
-REGISTERED_TESTSETS = {"test_in": {"n": 400, "sha": "13b027f23ec17c0f"}, "test_ood": {"n": 100, "sha": "a6e491a2502d099c"},
+# Official test sets = the files generated ONCE on Modal (2026-10-13, commit 0d2d8ce) and kept in /vol/synthetic; never
+# regenerated. Kaggle (sad-checks V3, same numpy 2.1.3 / scipy 1.16.3) gave the same sha for the single-region splits
+# (test_straight, test_curved) but not for test_in / test_ood (13b027f23ec17c0f / a6e491a2502d099c): the multi-region
+# mask path (spline zoom + exp) is not bit-identical across CPUs. regen_val_diff measures the size of that difference.
+REGISTERED_TESTSETS = {"test_in": {"n": 400, "sha": "0a83c5daad9657cb"}, "test_ood": {"n": 100, "sha": "978cc452c485da7f"},
                        "test_straight": {"n": 50, "sha": "d6936aac831e864f"}, "test_curved": {"n": 50, "sha": "ee6b893c9aa2c23a"}}
 SPLITS = list(REGISTERED_TESTSETS)
 # Kaggle-trained checkpoints uploaded to /vol/ckpts/<run>/final.pth (scripts in the evaluation section of docs).
@@ -210,6 +213,41 @@ def make_testsets() -> dict:
 
 
 @APP.function(image=image, volumes={"/vol": VOL}, cpu=4.0, memory=16384, timeout=3600)
+def regen_val_diff() -> dict:
+    """Regenerate val (40 images) on this platform into a scratch folder and compare pixel by pixel with the ORIGINAL
+    Kaggle val40 (sha 96ca0c00be35f399): how large is the cross-CPU difference of the generator?"""
+    import numpy as np
+    _link_repo(synthetic=False)
+    scratch = Path("/tmp/regen")
+    Path("data/synthetic").mkdir(parents=True, exist_ok=True)
+    if Path("data/synthetic/val").is_symlink():
+        Path("data/synthetic/val").unlink()
+    Path("data/synthetic/val").symlink_to(scratch, target_is_directory=True)
+    scratch.mkdir(parents=True, exist_ok=True)
+    out = subprocess.run(["python", "scripts/generate_testsets.py", "--config", "configs/experiments/SA-13_a2.yaml",
+                          "--splits", "val"], capture_output=True, text=True, check=True).stdout
+    rows = []
+    for f in sorted(Path("/vol/bundle/data/synthetic/val").glob("*.npz")):
+        a, b = np.load(f), np.load(scratch / f.name)
+        d_blur = np.abs(a["blur"].astype(np.float64) - b["blur"].astype(np.float64))
+        d_smap = np.abs(a["smap"].astype(np.float64) - b["smap"].astype(np.float64))
+        mse = float((d_blur ** 2).mean())
+        rows.append({"file": f.name, "regions": int(a["regions"]), "blur_max": float(d_blur.max()),
+                     "blur_mean": float(d_blur.mean()), "smap_max": float(d_smap.max()),
+                     "psnr_old_vs_new": 10 * np.log10(1 / mse) if mse > 0 else float("inf"),
+                     "identical": bool(d_blur.max() == 0 and d_smap.max() == 0)})
+    multi = [r for r in rows if r["regions"] > 1]
+    info = {"regen_line": out.strip().splitlines()[-1], "images": len(rows), "identical": sum(r["identical"] for r in rows),
+            "blur_max_abs_diff": max(r["blur_max"] for r in rows), "smap_max_abs_diff": max(r["smap_max"] for r in rows),
+            "min_psnr_old_vs_new_R>=2": min(r["psnr_old_vs_new"] for r in multi) if multi else None}
+    Path("/vol/eval/regen_val_diff.json").parent.mkdir(parents=True, exist_ok=True)
+    Path("/vol/eval/regen_val_diff.json").write_text(json.dumps({"summary": info, "rows": rows}, indent=1))
+    VOL.commit()
+    print(json.dumps(info, indent=1), flush=True)
+    return info
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, cpu=4.0, memory=16384, timeout=3600)
 def eval_plan(max_tier: int, shards: int) -> dict:
     """ckpts.json (Kaggle runs uploaded to /vol/ckpts, Modal runs that finished, public checkpoint as A0), checkpoint
     sha256 into /vol/eval/meta.json, then eval_queue plan. Seed-1 GoPro CSVs verified on Kaggle are copied in by the
@@ -218,6 +256,9 @@ def eval_plan(max_tier: int, shards: int) -> dict:
     _link_repo(synthetic=True)
     for s, want in REGISTERED_TESTSETS.items():
         assert len(list(Path(f"data/synthetic/{s}").glob("*.npz"))) == want["n"], f"{s} incomplete - run make_testsets"
+    on_vol = json.loads(Path("/vol/eval/testsets_sha.json").read_text())
+    assert all(on_vol.get(s) == want for s, want in REGISTERED_TESTSETS.items()), \
+        f"test sets on the Volume are not the official ones: {on_vol}"
     ck = {}
     for run in KAGGLE_RUNS:
         p = Path(f"/vol/ckpts/{run}/final.pth")

@@ -216,6 +216,12 @@ cho GoPro seed 1.
     cùng code (`faf4a06` = `862da1d` ở phần sinh dữ liệu), val sinh lại ngày 13/10 có sha `9dd67922cef51b0f` thay vì
     `96ca0c00be35f399`. 40 file val gốc vẫn cho đúng `96ca0c00be35f399`, nên mọi số val khi train không bị ảnh hưởng. Từ đây
     test set được sinh MỘT lần trong notebook đánh giá và lưu lại làm output (không "sinh lại rồi so sha" ở mỗi phiên).
+    Bổ sung 2026-10-13: kể cả với cùng numpy 2.1.3 / scipy 1.16.3, sinh trên Modal cho sha khác Kaggle ở `test_in`
+    (`0a83c5daad9657cb` so với `13b027f23ec17c0f`) và `test_ood` (`978cc452c485da7f` so với `a6e491a2502d099c`), nhưng trùng ở
+    `test_straight` và `test_curved` (một vùng). Phần chỉ chạy khi R >= 2 là sinh mặt nạ mềm (spline zoom, exp), nên khác
+    biệt đến từ đường tính của thư viện số theo CPU. **Bộ test chính thức là bộ sinh trên Modal, lưu cố định trong Volume
+    `sad-runs:/synthetic`, mọi mô hình đều được chấm trên đúng bộ file này**; sổ sha Kaggle chỉ còn giá trị lịch sử. Độ lớn
+    khác biệt được đo bằng `modal_train.py::regen_val_diff` (sinh lại val40 trên Modal và so từng pixel với 40 file gốc).
 
 ## Kiểm tra trước đánh giá: sad-checks Version 3 (CPU, commit `862da1d`, 2026-10-13)
 
@@ -289,7 +295,10 @@ SHA-256 `a2bdc2d37cd18ea2743b02b124af1fed0ac1f79bb9309603184ee06f41abc0d7`), md5
 (3) C4: 1,73-1,87 it/s trên L4 (data_frac 0), khoảng 4,8 giờ mỗi run 30k; ba run full nằm trong 30 USD.
 Cổng bổ sung C3b cho SA-33 (khai báo 2026-10-13 sau pilot, TRƯỚC khi có số của run full): pilot nén lịch cosine vào 1.500
 bước nên E chỉ có khoảng 500 bước ở lr cao; SA-33 chạy full nhưng **dừng nếu val_spearman ở bước 5.000 < 0,2**. Đây là điều
-chỉnh cổng sau pilot, báo cáo kèm lý do.
+chỉnh cổng sau pilot, báo cáo kèm lý do. Kết quả: SA-33 ở bước 2.500 val_spearman 0,254, ở bước 5.000 **0,317, đạt C3b**,
+chạy tiếp tới 30.000 (val PSNR 33,034 ở bước 5.000, ngang SFT-Free seed 1 Kaggle 33,001).
+Theo dõi val (40 ảnh, chỉ để theo dõi) các run full trên Modal, bước 2.500 / 5.000: SA-32 33,004 / 33,564; SA-33 32,499 / 33,034;
+SA-14 32,512 / 32,993. Đối chiếu Kaggle seed 1: SFT-Free 32,526 / 33,001, SFT-Map 32,553 / 33,049.
 Cài đặt: `BlurMapEstimatorV2` (modules.py), `build_variant(..., estimator=)`, `make_loss(..., map_source=)`,
 `val_metrics(..., map_source=)`, `scripts/modal_train.py`; test `test_estimator_v2_identity_at_init_and_no_image_wide_statistics`,
 `test_oracle_map_source_feeds_the_true_map_in_loss_and_val`.
