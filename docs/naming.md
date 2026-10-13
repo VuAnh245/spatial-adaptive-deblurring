@@ -80,6 +80,8 @@ Ngoại lệ duy nhất: trích nguyên nhãn hình của bài báo khác, ví d
 | SA-29 | So với phương pháp cổ điển (Wiener, Richardson-Lucy) |
 | SA-30 | Trực quan hệ số điều biến |
 | SA-31 | Hiệu năng tính toán |
+| SA-32 | SFT-Map huấn luyện với bản đồ thật (QĐ-10, thăm dò) |
+| SA-33 | SFT-Map với bộ ước lượng sửa (QĐ-10, thăm dò) |
 
 ### Tập dữ liệu
 
@@ -146,13 +148,14 @@ Số thập phân trong hình dùng dấu phẩy (0,45). Kết luận của `scr
 | --- | --- | --- | --- |
 | QĐ-01 | Giao thức đánh giá | "TLC chính, global phụ" | Đã chốt 2026-10-05 (`docs/experiments.md`) |
 | QĐ-02 | Thang vùng nhòe train và test | Chọn "Ô vuông + đa thang" (loại "Giữ lưới cũ") | Đã chốt 2026-10-05, trước Bước 5 (`docs/experiments.md`). Số EDA chỉ để xác nhận và ghi vào báo cáo |
-| QĐ-03 | Ngưỡng nhóm H | "Theo phân vị 33/67" trên H của các mẫu R ≥ 2 (500 mẫu EDA, làm tròn 2 chữ số); nhóm "H bằng 0" gồm các ảnh R = 1 | Quy tắc đã chốt, chờ số EDA rồi ghi vào config trước Bước 5 |
+| QĐ-03 | Ngưỡng nhóm H | "Theo phân vị 33/67" trên H của các mẫu R ≥ 2 (500 mẫu EDA, làm tròn 2 chữ số); nhóm "H bằng 0" gồm các ảnh R = 1 | Đã ghi số 2026-10-13 (sad-checks V3, trước đánh giá test tổng hợp): `data.h_bins: [0.11, 0.18]` |
 | QĐ-04 | Công thức huấn luyện và số iteration chung | "Một ITERS cho mọi mô hình, gói vừa một phiên" (batch 8; lr hạ từ 2e-4 xuống 1e-4 sau khi pilot lần hai phân kỳ) | Đã chốt: lr 1e-4, FP32, ITERS = 30.000, chốt chặn 11,5 giờ (`docs/experiments.md`) |
 | QĐ-05 | Đơn vị gộp khi kiểm định | "Gộp theo video" (10 nhóm trên GoPro test), báo kèm tỉ lệ thắng theo ảnh | Đã chốt 2026-10-06 |
 | QĐ-06 | Quy tắc khớp tham số của Baseline-L | "Ít block nhất, lệch ≤ 5% phần thêm" (2 block ở dec1, 17.349.731 tham số); loại "Khớp tuyệt đối", "Một block ở dec0" | Đã chốt 2026-10-06 |
 | QĐ-07 | Độ chính xác số khi train | "FP32 toàn phần" (loại "AMP + dò lỗi"); nếu hết bộ nhớ thì tích lũy gradient 4 × 2 | Đã chốt 2026-10-06 |
 | QĐ-08 | Ổn định SFT-Map+Ch (SA-14) | "Nhánh channel đọc đặc trưng chuẩn hóa + dừng trước bước cập nhật hỏng"; loại "Giữ nguyên A3 gốc", "Hạ lr hoặc đổi batch riêng cho A3" | Đã chốt 2026-10-13 (`docs/experiments.md`) |
 | QĐ-09 | Chỉ tiêu chính, so sánh nhiều lần, gộp seed | PSNR `test_in` là chỉ tiêu chính; Holm trên họ phép so sánh lõi; Phép thử giám sát gộp 3 seed | Đã chốt 2026-10-13, sau GoPro seed 1, trước test tổng hợp |
+| QĐ-10 | Thí nghiệm thăm dò sau chẩn đoán E | "Trần bản đồ thật + bộ ước lượng sửa" (SA-32, SA-33), cổng C1-C4, tiêu chí khai báo trước | Đã chốt 2026-10-13 (`docs/experiments.md`) |
 | CH-01 | Gradient của SFT head khi lớp cuối khởi tạo 0 | | Nội dung đúng, chờ câu trả lời bằng lời của sinh viên qua CH-03 |
 | CH-02 | Vì sao TLC chỉ có tác dụng khi ảnh test lớn hơn patch train | | Đạt |
 | CH-03 | Nếu `sft.*.conv2` của SFT-Free vẫn gần 0 sau 10k iter thì đường val so với Baseline thế nào, và có kết luận được gì | | Chờ trả lời |

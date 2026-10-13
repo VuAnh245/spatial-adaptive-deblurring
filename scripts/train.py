@@ -31,6 +31,8 @@ from spatial_deblur.utils.seed import set_seed
 
 
 def git_commit() -> str:
+    if os.environ.get("GIT_COMMIT"):  # set by scripts/modal_train.py: the image holds the source tree, not .git
+        return os.environ["GIT_COMMIT"]
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL).strip()
     except Exception:
@@ -87,7 +89,8 @@ def main() -> None:
     cfg["provenance"] = provenance
 
     kw = {k: m[k] for k in ("width", "middle_blk_num", "enc_blk_nums", "dec_blk_nums")}
-    model = apply_model_options(build_variant(m["variant"], kw), m)  # detach_map (SA-17), chan_input (QĐ-08)
+    model = apply_model_options(build_variant(m["variant"], kw, estimator=m.get("estimator", "v1")), m)
+    map_source = m.get("map_source", "pred")  # QĐ-10: "oracle" feeds the true S to the SFT heads (SA-32)
     report = load_official_checkpoint(model, m["init_checkpoint"], strict=False)
     cfg["init_load"] = {"missing": len(report.missing_keys), "unexpected": len(report.unexpected_keys)}
     if report.unexpected_keys:
@@ -107,9 +110,9 @@ def main() -> None:
     val_set = FixedSyntheticDataset(Path(d["synthetic_root"]) / "val")
 
     def val_fn(model):
-        return val_metrics(model, val_set, a.device)  # same code path as tests/test_modulation.py
+        return val_metrics(model, val_set, a.device, map_source=map_source)  # same code path as the tests
 
-    trainer = Trainer(model, make_loss(cfg["loss"]["lambda_map"]), loader, out, lr=t["lr"],
+    trainer = Trainer(model, make_loss(cfg["loss"]["lambda_map"], map_source=map_source), loader, out, lr=t["lr"],
                       iterations=t["iterations"], warmup=t["warmup"], min_lr=t["min_lr"],
                       betas=tuple(t["betas"]), weight_decay=t["weight_decay"], grad_clip=t["grad_clip"],
                       amp=t["amp"], ckpt_every=t["ckpt_every"], val_fn=val_fn if len(val_set) else None,

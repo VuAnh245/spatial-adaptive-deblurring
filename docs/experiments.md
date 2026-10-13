@@ -208,10 +208,78 @@ cho GoPro seed 1.
 (5) Fine-tune chỉ trên nhòe tổng hợp (kernel tĩnh chập trong sRGB, trộn theo mặt nạ, nhiễu σ = 0,01; bán kính RMS tối đa khoảng
     6 px) làm mất bớt khả năng gỡ nhòe thật: trên GoPro test cả bốn mô hình seed 1 còn khoảng 28,36 dB (uint8) so với 32,87 dB
     của checkpoint công khai. Mức tụt có ở mọi mức nhòe, 163/1111 ảnh kém hơn ảnh nhòe đầu vào. GoPro thật vì vậy là phép thử
-    ngoài phân phối của các mô hình đã fine-tune (QĐ-09: chỉ tiêu phụ). Còn chờ phép kiểm tra pipeline (trọng số công khai qua
-    đúng đường `build_variant` + `evaluate.py` phải cho lại 32,87 dB) trước khi quy hẳn mức tụt cho fine-tune.
+    ngoài phân phối của các mô hình đã fine-tune (QĐ-09: chỉ tiêu phụ). Phép kiểm tra pipeline K1 (sad-checks V3) đã loại trừ
+    lỗi đo: trọng số công khai qua đúng đường `build_variant` + `convert_tlc` khớp SA-00 tới 4e-5 dB trên 24 ảnh.
 (6) Bộ ước lượng E chưa được kiểm tra khả năng học trước khi train chính; sau 30.000 bước nó cho bản đồ gần hằng
     (xem "Kết luận về bộ ước lượng E").
+(7) Sinh lại dữ liệu tổng hợp không cho cùng byte khi môi trường Kaggle ("Latest Container Image") đổi phiên bản thư viện:
+    cùng code (`faf4a06` = `862da1d` ở phần sinh dữ liệu), val sinh lại ngày 13/10 có sha `9dd67922cef51b0f` thay vì
+    `96ca0c00be35f399`. 40 file val gốc vẫn cho đúng `96ca0c00be35f399`, nên mọi số val khi train không bị ảnh hưởng. Từ đây
+    test set được sinh MỘT lần trong notebook đánh giá và lưu lại làm output (không "sinh lại rồi so sha" ở mỗi phiên).
+
+## Kiểm tra trước đánh giá: sad-checks Version 3 (CPU, commit `862da1d`, 2026-10-13)
+
+(1) K1, pipeline đánh giá: 24 ảnh GoPro test rải đều 10 video. Trọng số công khai qua `build_variant` + nạp như `train.py`
+    + `convert_tlc` lệch tối đa 4,4e-5 dB so với SA-00; `final.pth` của SA-10 (CPU) lệch tối đa 5,2e-5 dB so với CSV GoPro
+    đã kiểm chứng (GPU). Trung bình 24 ảnh: công khai 33,348 dB, SA-10 28,559 dB. **Đạt**: mức tụt GoPro là do fine-tune.
+(2) P1: val sinh lại có sha khác (giới hạn (7)), nên K2 bị chốt chặn bỏ qua và chạy lại ở Version 4 trên 40 file val gốc.
+(3) K3, EDA 500 mẫu: R cân bằng (126/127/133/114), s_r phủ đều 4 khoảng; sai số |đo - đích| của s_r trung vị 0,0145;
+    ngưỡng H (QĐ-03) 0,1061 và 0,1795, ghi `data.h_bins: [0.11, 0.18]`; cạnh mảng vùng trung vị 69 px trên patch train và
+    136 px trên khung đầy đủ, tỉ lệ 1,96 lần (giới hạn (3)).
+(4) K4, test tổng hợp sinh trong phiên này (sổ sha tham chiếu): `test_in` 400 ảnh `13b027f23ec17c0f`, `test_ood` 100 ảnh
+    `a6e491a2502d099c`, `test_straight` 50 ảnh `d6936aac831e864f`, `test_curved` 50 ảnh `ee6b893c9aa2c23a`.
+Bằng chứng: `results/artifacts/kaggle/sad-checks/v3-run/` (zip 1.102.682 byte, MANIFEST 13/13 file khớp SHA-256).
+
+## Chẩn đoán bộ ước lượng E (2026-10-13)
+
+(1) K2, phép thử bộ ước lượng (sad-checks Version 4, CPU; 40 file val gốc sha `96ca0c00be35f399`; bundle mã đóng băng;
+    `probe_estimator.py` sha `f761142a…`): E train riêng chỉ với L_map, 1.000 bước, **không có loss khôi phục**, vẫn sụp về
+    hằng: lr 1e-4 Spearman 0,011 → −0,002, MAE 0,207 → 0,178, std(Ŝ) 0,0023; lr 1e-3 Spearman → −0,007, std(Ŝ) 0,0008.
+    Loss train đứng ở khoảng 0,0224 = loss của bản đồ hằng. Giả thuyết "cạnh tranh gradient với loss khôi phục" bị bác bỏ.
+    Bằng chứng: `results/artifacts/kaggle/sad-checks/v4-k2/` (MANIFEST 8/8 khớp).
+(2) Chẩn đoán local trên CPU (`analysis/estimator_learnability.py`, cùng bộ sinh nhòe, ảnh nét lấy từ val40):
+    nhãn đúng (Spearman giữa s và bán kính RMS của kernel = 1,00) và mức nhòe có trong ảnh đầu vào (một đặc trưng thủ công
+    trên ảnh nhòe đạt Spearman −0,54 với s). E của đồ án không học được kể cả khi R = 1 (Spearman khoảng 0, loss không thấp hơn
+    bản đồ hằng). Một biến thể thăm dò cùng độ rộng (chuẩn hóa đầu vào, GroupNorm, khởi tạo Kaiming, lớp đầu stride 1) học
+    được: R = 1 Spearman 0,82; R từ 1 đến 4 Spearman 0,56 theo pixel, 0,70 theo patch; loss test 0,0142 so với 0,0205.
+Kết luận: SFT-Map không thích ứng được theo vùng vì **thiết kế/khởi tạo của bộ ước lượng E** khiến nó không học được bản đồ,
+không phải vì dữ liệu, nhãn hay cạnh tranh gradient. Chưa tách được yếu tố nào trong bốn thay đổi là quyết định.
+SA-13 giữ nguyên làm kết quả của giao thức đã khóa. SA-14 dùng cùng E nên cũng chịu hạn chế này.
+Thu seed 3 (2026-10-13): `xunanhv/sad-train-a12-seeds` Version 2 / scriptVersionId 357688314, COMPLETE. Archive
+`results/artifacts/kaggle/357688314/original/remaining_training_wave_a12_seed3.zip` 556.912.598 byte, SHA-256
+`5d8c42e9130db8d7b93e38c8042d99708d591649739e960a73b4fafed97fa3c2` (khớp giá trị in trong log phiên), CRC đạt, MANIFEST 22/22.
+SA-13_seed3 và SA-12_seed3: returncode 0, sự kiện cuối `finished`, `train_done` 30.000 bước, không dừng sớm, commit `faf4a06`,
+Tesla T4 / torch 2.11.0+cu128, 712 tensor hữu hạn; `final.pth` SHA-256 bắt đầu `6a112859ba5bf287` (SA-13) và `94973423c3de5800`
+(SA-12). Train lõi: 8/9 run xong (thiếu SA-14). Registry chưa cập nhật cho seed 3.
+
+## QĐ-10 Thí nghiệm thăm dò sau chẩn đoán E (chốt 2026-10-13, trước mọi run SA-32/33)
+
+Đã duyệt kèm: SA-14 (QĐ-08) xếp thứ ba, chỉ chạy nếu chi phí đo ở pilot cho phép; cắt RealBlur-J, LPIPS và SA-26 (đưa vào
+hướng phát triển); ngân sách Modal tối đa 30 USD credit, trần tài khoản 42,50 USD.
+
+Phương án "Trần bản đồ thật + bộ ước lượng sửa", hai thí nghiệm post-hoc, seed 1, công thức QĐ-04 không đổi (30.000 bước,
+lr 1e-4, batch 8, FP32, khởi tạo checkpoint công khai, cùng dòng dữ liệu seed 1, val40 gốc):
+(1) SA-32 "SFT-Map huấn luyện với bản đồ thật" (`SA-32_a2_oracle_train.yaml`): SFT head nhận S thật thu nhỏ 1/4 khi train và
+    khi val (`map_source: oracle`), lambda_map 0. Đánh giá bằng `--mode oracle`. Đo trần của ý tưởng, không phụ thuộc E;
+(2) SA-33 "SFT-Map với bộ ước lượng sửa" (`SA-33_a2_estimator_v2.yaml`): chỉ thay E bằng `BlurMapEstimatorV2` (chuẩn hóa đầu
+    vào, LayerNorm2d theo từng pixel, Kaiming, lớp đầu stride 1; không có thống kê toàn ảnh nên không lệch train/test như
+    GroupNorm); lambda_map 0,1 như SA-13.
+Cả hai không thay SA-13, không thuộc họ phép so sánh chính của QĐ-09; chạy trên Modal (L4), ghi GPU/commit.
+
+Tiêu chí đọc kết quả, khai báo trước (chỉ tiêu `test_in`, PSNR, TLC):
+(1) so với SFT-Free seed 1 (SA-12, cùng kiến trúc, cùng dòng dữ liệu) và Baseline seed 1 (SA-10);
+(2) gọi là "có hiệu quả" khi cả hai điều kiện: chênh trung bình theo video > 3 lần độ lệch chuẩn giữa 3 seed của SFT-Free
+    trên `test_in`, và CI bootstrap 95% theo video không chứa 0; ngược lại ghi "không phân biệt được với dao động giữa seed";
+(3) SA-33 báo thêm chất lượng bản đồ (MAE, Spearman trên `test_in`) và SA-20/21 của chính nó.
+Cổng trước khi tiêu tiền: C1 E bản sửa học được trên CPU (Spearman theo patch >= 0,5, R 1-4); C2 SA-12 seed 1 trên Modal tới
+bước 2.500 lệch val <= 0,02 dB so với Kaggle; C3 pilot 1.500 bước đạt (không dừng sớm, val bước 1.500 >= bước 0; SA-33 có
+val_spearman > 0,2 ở bước 1.500); C4 tổng chi phí dự tính <= 30 USD credit (thứ tự ưu tiên SA-32, SA-33, SA-14).
+Kết quả cổng C1 (2026-10-13, CPU local, `estimator_learnability.py --models v2`, đúng module `BlurMapEstimatorV2`):
+R = 1 Spearman 0,41 theo pixel / 0,73 theo patch; R từ 1 đến 4 Spearman 0,49 theo pixel / **0,75 theo patch** (ngưỡng 0,5),
+loss test 0,0149 so với 0,0205 của bản đồ hằng. **Đạt.** E gốc cùng thiết lập: Spearman khoảng 0.
+Cài đặt: `BlurMapEstimatorV2` (modules.py), `build_variant(..., estimator=)`, `make_loss(..., map_source=)`,
+`val_metrics(..., map_source=)`, `scripts/modal_train.py`; test `test_estimator_v2_identity_at_init_and_no_image_wide_statistics`,
+`test_oracle_map_source_feeds_the_true_map_in_loss_and_val`.
 
 ## Log chẩn đoán khi train
 

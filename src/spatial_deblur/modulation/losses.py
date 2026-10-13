@@ -17,9 +17,22 @@ def charbonnier(pred: torch.Tensor, target: torch.Tensor, eps: float = 1e-3) -> 
     return torch.sqrt((pred - target) ** 2 + eps ** 2).mean()
 
 
-def make_loss(lambda_map: float = 0.1):
+def oracle_map(smap: torch.Tensor) -> torch.Tensor:
+    """True S at the estimator's 1/4 resolution, exactly as the SA-20 oracle of evaluate.py / analysis.predict."""
+    return F.interpolate(smap, scale_factor=0.25, mode="area")
+
+
+def make_loss(lambda_map: float = 0.1, map_source: str = "pred"):
+    """``map_source='oracle'`` (QĐ-10, SA-32): the SFT heads receive the true S (oracle_map) instead of S_hat
+    during training; use lambda_map = 0 (the estimator is then unused and untrained)."""
+    if map_source not in ("pred", "oracle"):
+        raise ValueError(f"map_source must be 'pred' or 'oracle', got {map_source!r}")
+
     def loss_fn(model, batch):
-        out = model(batch["blur"])
+        if map_source == "oracle":
+            out = model(batch["blur"], smap_override=oracle_map(batch["smap"]))
+        else:
+            out = model(batch["blur"])
         pred, s_hat = out if isinstance(out, tuple) else (out, None)
         l_rec = charbonnier(pred, batch["sharp"])
         parts = {"charbonnier": l_rec.detach()}

@@ -455,3 +455,51 @@ def test_trainer_fail_fast_on_nonfinite_gradient_with_finite_loss(tmp_path):
     assert all(torch.isfinite(p).all() for p in tr.model.parameters())
     ev = [json.loads(x) for x in (tmp_path / "events.jsonl").read_text().splitlines()]
     assert ev[-1]["event"] == "aborted_nonfinite_grad" and ev[-1]["loss_finite"] is True
+
+
+def test_estimator_v2_identity_at_init_and_no_image_wide_statistics():
+    """QĐ-10 (SA-33): SFT-Map with BlurMapEstimatorV2 still equals A0 at init; the estimator uses no image-wide
+    statistics (per-pixel LayerNorm2d), so cropping before or after it gives the same interior (no train/test gap)."""
+    from spatial_deblur.modulation.modules import BlurMapEstimatorV2
+
+    torch.manual_seed(0)
+    a0 = build_variant("A0", TINY)
+    _nonzero_residuals(a0)
+    x = torch.rand(2, 3, 32, 48)
+    ref, _ = a0(x)
+    m = build_variant("A2", TINY, estimator="v2")
+    assert isinstance(m.estimator, BlurMapEstimatorV2)
+    assert not m.load_state_dict(a0.state_dict(), strict=False).unexpected_keys
+    out, s_hat = m(x)
+    assert torch.allclose(out, ref, atol=1e-6) and s_hat.shape == (2, 1, 8, 12)
+    est = BlurMapEstimatorV2().eval()
+    big = torch.rand(1, 3, 128, 128)
+    with torch.no_grad():
+        full, crop = est(big), est(big[..., 32:96, 32:96])
+    assert torch.allclose(full[..., 8:24, 8:24][..., 4:-4, 4:-4], crop[..., 4:-4, 4:-4], atol=1e-5)
+
+
+def test_oracle_map_source_feeds_the_true_map_in_loss_and_val():
+    """QĐ-10 (SA-32): map_source='oracle' passes down4(S) to the SFT heads in the loss and in val_metrics."""
+    import torch.nn.functional as F
+    from spatial_deblur.modulation.analysis import val_metrics
+    from spatial_deblur.modulation.losses import make_loss, oracle_map
+
+    torch.manual_seed(0)
+    m = build_variant("A2", TINY)
+    _nonzero_residuals(m)
+    for p in m.sft.parameters():
+        p.data.normal_(0, 0.5)  # heads that react to the map
+    blur, sharp = torch.rand(2, 3, 32, 32), torch.rand(2, 3, 32, 32)
+    smap = torch.rand(2, 1, 32, 32)
+    loss_o, _ = make_loss(0.0, map_source="oracle")(m, {"blur": blur, "sharp": sharp, "smap": smap})
+    pred_o, _ = m(blur, smap_override=oracle_map(smap))
+    assert torch.allclose(loss_o, torch.sqrt((pred_o - sharp) ** 2 + 1e-6).mean())
+    loss_p, _ = make_loss(0.0)(m, {"blur": blur, "sharp": sharp, "smap": smap})
+    assert not torch.allclose(loss_o, loss_p)
+    val = [{"blur": blur[0], "sharp": sharp[0], "smap": smap[0], "regions": 2}]
+    with torch.no_grad():
+        po, _ = m(blur[:1], smap_override=F.interpolate(smap[:1], scale_factor=0.25, mode="area"))
+    from spatial_deblur.metrics.image_quality import psnr
+    expect = psnr(po[0].clamp(0, 1).permute(1, 2, 0).numpy(), sharp[0].permute(1, 2, 0).numpy())
+    assert abs(val_metrics(m, val, "cpu", map_source="oracle")["val_psnr"] - expect) < 1e-9

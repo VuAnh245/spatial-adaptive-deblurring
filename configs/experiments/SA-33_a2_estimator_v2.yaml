@@ -1,0 +1,11 @@
+_base_:
+- ../_base_/data.yaml
+- ../_base_/model.yaml
+- ../_base_/train.yaml
+experiment_id: SA-33
+seed: 1
+model:
+  variant: A2
+  estimator: v2        # QĐ-10: BlurMapEstimatorV2 (normalised input, per-pixel LayerNorm2d, Kaiming, stride-1 first conv)
+loss:
+  lambda_map: 0.1      # unchanged from SA-13: only the estimator differs

@@ -1,0 +1,11 @@
+_base_:
+- ../_base_/data.yaml
+- ../_base_/model.yaml
+- ../_base_/train.yaml
+experiment_id: SA-32
+seed: 1
+model:
+  variant: A2
+  map_source: oracle   # QĐ-10: SFT heads get the true S (1/4 res) in training and val; evaluate with --mode oracle
+loss:
+  lambda_map: 0.0      # the estimator is unused, so it is not trained

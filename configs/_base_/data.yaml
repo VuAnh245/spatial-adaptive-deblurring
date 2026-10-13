@@ -16,6 +16,8 @@ data:
   severity_scale: {r_min: 0.0, r_max: 8.0}   # fixed once after EDA, never changed
   mask_grid_train: [3, 4, 5, 6]   # QĐ-02 "Ô vuông + đa thang": square grid drawn per training patch
   mask_grid_test: [6, 10]         # QĐ-02: rows x cols on full frames -> square cells (~127 x 132 px)
+  h_bins: [0.11, 0.18]            # QĐ-03: tertiles of H over R>=2 in the 500-sample EDA (0.1061, 0.1795), 2 decimals;
+                                  # sad-checks V3, 2026-10-13. Groups: R=1 | H<0.11 | 0.11<=H<0.18 | H>=0.18
   testsets:             # reduced for the 5-day schedule (full design: 100/300/300/150/150)
     val: {per_region: 10}   # 40 images: monitoring only (val PSNR, Spearman), keeps one val pass short
     test_in: {per_region: 100}

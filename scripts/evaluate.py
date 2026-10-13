@@ -61,7 +61,9 @@ def main() -> None:
         raise SystemExit("SA-29: run `python analysis/classical_baselines.py` (Wiener / RL, true kernel, R = 1)")
 
     kw = {k: m[k] for k in ("width", "middle_blk_num", "enc_blk_nums", "dec_blk_nums")}
-    model = apply_model_options(build_variant(m["variant"], kw), m)  # chan_input of A3 (QĐ-08)
+    model = apply_model_options(build_variant(m["variant"], kw, estimator=m.get("estimator", "v1")), m)  # QĐ-08/10
+    if m.get("map_source", "pred") == "oracle" and a.mode == "pred":
+        raise SystemExit("SA-32 was trained with the true map: evaluate it with --mode oracle (its estimator is untrained)")
     model.load_state_dict(torch.load(a.ckpt, map_location="cpu"))
     model = model.eval()
     if a.pool == "tlc":

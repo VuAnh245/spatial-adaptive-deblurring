@@ -1,6 +1,9 @@
 """Supervised spatial feature modulation (study contribution).
 
 - ``BlurMapEstimator``: B -> S_hat at 1/4 resolution, sigmoid output.
+- ``BlurMapEstimatorV2`` (QĐ-10, SA-33 only): same width and output; normalised input, per-pixel LayerNorm2d after
+  every conv, Kaiming init, stride-1 first conv. The original estimator collapses to a constant map even when
+  trained alone (sad-checks V4, analysis/estimator_learnability.py).
 - ``SpatialSFTHead``: S_l -> (delta_gamma_s, beta_s), per pixel and channel.
 - ``ChannelModulation``: GAP(F_l) -> (delta_gamma_c, beta_c), per channel (A3 only).
 
@@ -40,6 +43,30 @@ class BlurMapEstimator(nn.Module):
 
     def forward(self, blur: torch.Tensor) -> torch.Tensor:
         return torch.sigmoid(self.net(blur))
+
+
+class BlurMapEstimatorV2(nn.Module):
+    """QĐ-10 (SA-33): BlurMapEstimator with normalised input, LayerNorm2d after each conv, Kaiming init and a
+    stride-1 first conv. LayerNorm2d normalises over channels at each pixel (as in NAFNet), so there are no
+    image-wide statistics: the output does not depend on the image size (no train-patch / full-frame gap that TLC
+    would have to fix). Output: sigmoid map at 1/4 resolution, like BlurMapEstimator."""
+
+    def __init__(self, hidden: int = 64):
+        super().__init__()
+        from ..models.nafnet import LayerNorm2d
+
+        def blk(i, o, s):
+            return [nn.Conv2d(i, o, 3, s, 1), LayerNorm2d(o), nn.GELU()]
+
+        self.net = nn.Sequential(*blk(3, 32, 1), *blk(32, hidden, 2), *blk(hidden, hidden, 2),
+                                 *blk(hidden, hidden, 1), *blk(hidden, hidden, 1), nn.Conv2d(hidden, 1, 1))
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                nn.init.zeros_(m.bias)
+
+    def forward(self, blur: torch.Tensor) -> torch.Tensor:
+        return torch.sigmoid(self.net((blur - 0.5) / 0.25))
 
 
 class SpatialSFTHead(nn.Module):

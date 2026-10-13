@@ -22,12 +22,14 @@ import torch
 import torch.nn as nn
 
 from ..models.nafnet import NAFBlock, NAFNet
-from .modules import BlurMapEstimator, ChannelModulation, SpatialSFTHead
+from .modules import BlurMapEstimator, BlurMapEstimatorV2, ChannelModulation, SpatialSFTHead
+
+ESTIMATORS = {"v1": BlurMapEstimator, "v2": BlurMapEstimatorV2}  # v2: QĐ-10, SA-33 only
 
 
 class ModulatedNAFNet(NAFNet):
     def __init__(self, spatial: bool = True, channel: bool = False, detach_map: bool = False,
-                 chan_input: str = "norm", **nafnet_kwargs):
+                 chan_input: str = "norm", estimator: str = "v1", **nafnet_kwargs):
         super().__init__(**nafnet_kwargs)
         self.spatial, self.channel = spatial, channel
         self.detach_map = detach_map  # SA-17: restoration gradient does not reach the estimator
@@ -37,7 +39,7 @@ class ModulatedNAFNet(NAFNet):
         stages = {f"enc{i}": c for i, c in enumerate(self.enc_channels)}
         stages["mid0"] = self.middle_channels
         stages.update({f"dec{i}": c for i, c in enumerate(self.dec_channels)})
-        self.estimator = BlurMapEstimator() if spatial else None
+        self.estimator = ESTIMATORS[estimator]() if spatial else None
         self.sft = nn.ModuleDict({k: SpatialSFTHead(c) for k, c in stages.items()}) if spatial else None
         self.chan = nn.ModuleDict({k: ChannelModulation(c) for k, c in stages.items()}) if channel else None
         self._smap: torch.Tensor | None = None
@@ -75,15 +77,19 @@ class ModulatedNAFNet(NAFNet):
         return out[..., :h, :w], s_hat
 
 
-def build_variant(variant: str, nafnet_kwargs: dict | None = None) -> nn.Module:
+def build_variant(variant: str, nafnet_kwargs: dict | None = None, estimator: str = "v1") -> nn.Module:
+    """``estimator`` is a layer choice (it changes the state_dict), so it is fixed at construction:
+    train.py and evaluate.py pass ``model.estimator`` from the config (default v1 = every locked run)."""
     kw = dict(width=32, middle_blk_num=1, enc_blk_nums=(1, 1, 1, 28), dec_blk_nums=(1, 1, 1, 1))
     kw.update(nafnet_kwargs or {})
+    if estimator not in ESTIMATORS:
+        raise ValueError(f"estimator must be one of {sorted(ESTIMATORS)}, got {estimator!r}")
     if variant == "A0":
         return ModulatedNAFNet(spatial=False, channel=False, **kw)
     if variant in ("A1", "A2"):
-        return ModulatedNAFNet(spatial=True, channel=False, **kw)
+        return ModulatedNAFNet(spatial=True, channel=False, estimator=estimator, **kw)
     if variant == "A3":
-        return ModulatedNAFNet(spatial=True, channel=True, **kw)
+        return ModulatedNAFNet(spatial=True, channel=True, estimator=estimator, **kw)
     if variant == "A0+":
         return build_param_matched(build_variant("A2", kw), kw)
     raise ValueError(f"unknown variant {variant}")

@@ -21,7 +21,8 @@ COMPARISON_LABELS = {("A1", "A0"): "Phép thử điều biến",
                      ("A3", "A2"): "Phép thử nhánh kênh"}
 
 EXPERIMENT_MODEL = {"SA-00": "nafnet_public", "SA-10": "A0", "SA-11": "A0+", "SA-12": "A1", "SA-13": "A2", "SA-14": "A3",
-                    "SA-15": "A2", "SA-16": "A2", "SA-17": "A2", "SA-18": "A2", "SA-19": "A2"}
+                    "SA-15": "A2", "SA-16": "A2", "SA-17": "A2", "SA-18": "A2", "SA-19": "A2",
+                    "SA-32": "A2", "SA-33": "A2"}
 EXPERIMENT_LABELS = {
     "SA-00": "Tái lập NAFNet gốc trên GoPro",
     "SA-10": "Huấn luyện Baseline", "SA-11": "Huấn luyện Baseline-L", "SA-12": "Huấn luyện SFT-Free",
@@ -35,6 +36,7 @@ EXPERIMENT_LABELS = {
     "SA-27": "Kernel thẳng và kernel cong", "SA-28": "Ảnh nhòe thật (GoPro, RealBlur-J)",
     "SA-29": "So với phương pháp cổ điển (Wiener, Richardson-Lucy)", "SA-30": "Trực quan hệ số điều biến",
     "SA-31": "Hiệu năng tính toán",
+    "SA-32": "SFT-Map huấn luyện với bản đồ thật", "SA-33": "SFT-Map với bộ ước lượng sửa",
 }
 
 SPLIT_LABELS = {"val": "Tập kiểm định", "test_in": "Tổng hợp trong phân phối",

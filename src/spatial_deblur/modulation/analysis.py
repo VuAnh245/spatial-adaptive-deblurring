@@ -42,15 +42,20 @@ def heterogeneity(smap: np.ndarray) -> float:
 
 
 @torch.no_grad()
-def val_metrics(model, val_set, device: str = "cpu", max_images: int = 50) -> dict[str, float]:
+def val_metrics(model, val_set, device: str = "cpu", max_images: int = 50, map_source: str = "pred") -> dict[str, float]:
     """Monitoring metrics of a val pass during training (train.py): PSNR on every image; for models with
     a map, MAE of S_hat on every image and Spearman(S_hat, S) only on images with R >= 2 (undefined for a
-    constant map), averaged with nanmean."""
+    constant map), averaged with nanmean. ``map_source='oracle'`` (SA-32): PSNR with the true S fed to the
+    SFT heads, as in training; the map metrics then describe the unused estimator."""
     from ..metrics.image_quality import psnr
     ps, sp, mae = [], [], []
     for i in range(0, len(val_set), max(1, len(val_set) // max_images)):
         s = val_set[i]
-        pred, s_hat = model(s["blur"][None].to(device))
+        if map_source == "oracle":
+            s4 = F.interpolate(s["smap"][None].to(device), scale_factor=0.25, mode="area")
+            pred, s_hat = model(s["blur"][None].to(device), smap_override=s4)
+        else:
+            pred, s_hat = model(s["blur"][None].to(device))
         ps.append(psnr(pred[0].clamp(0, 1).permute(1, 2, 0).float().cpu().numpy(),
                        s["sharp"].permute(1, 2, 0).numpy()))
         if s_hat is not None:
