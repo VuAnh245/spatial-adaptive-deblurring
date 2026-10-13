@@ -457,6 +457,28 @@ SA-36 ước tính 1,5-2 USD (3 container L4 song song, khoảng 25-30 phút m�
 Cài đặt: `analysis/weight_interp.py` (`make`, `summary`), `scripts/modal_train.py::weight_interp_all` /
 `weight_interp_eval` (CSV vào `/vol/eval_interp`, không ghi đè), test `test_weight_interp_endpoints_midpoint_and_mismatch`.
 
+Kết quả SA-36 (2026-10-14 khoảng 03:35): `results/eval/modal_sa36/` (6 CSV, đủ 400 / 1.111 ảnh, ID khớp SA-00, PSNR hữu
+hạn), commit `2fc678e`, NVIDIA L4; checkpoint nội suy SHA-256 đầu: alpha 0,25 `b961329d2f5d57b2`, 0,5 `f9fc4f46e96c4098`,
+0,75 `f45008a233d8d1a7`; hai đầu mút khớp `4b4c236a…` / `a2a43044…`.
+
+| alpha | `test_in` | GoPro thật | `test_in` so với Baseline | GoPro so với checkpoint công khai | Trên dây cung |
+| --- | --- | --- | --- | --- | --- |
+| 0 (công khai) | 25,607 | 32,882 | -8,458 | đầu mút | - |
+| 0,25 | 29,995 | 32,129 | -3,941 [-4,232; -3,701] | -0,769 [-1,011; -0,558] | có |
+| 0,5 | 31,293 | 30,771 | -2,638 [-2,929; -2,403] | -2,151 [-2,697; -1,666] | có |
+| 0,75 | 32,834 | 29,485 | -1,106 [-1,243; -0,986] | -3,450 [-4,156; -2,763] | không (GoPro thấp hơn dây cung 0,01) |
+| 1 (Baseline) | 33,951 | 28,370 | đầu mút | -4,582 | - |
+
+(Chênh theo video, CI bootstrap 95%, mọi p = 0,002.) Đọc theo tiêu chí khai báo:
+(1) **không có alpha nào giữ được cả hai miền**: mọi điểm giữa đều thua có ý nghĩa ở cả hai tập; mức thua lớn nhất nhỏ nhất
+    là 2,66 dB (alpha 0,5);
+(2) đường cong **cong lồi về phía tốt** ở alpha 0,25 và 0,5 (trên dây cung: `test_in` +2,30 / +1,51 dB, GoPro +0,38 /
+    +0,15 dB so với trộn tuyến tính điểm số), tức là nội suy trọng số tốt hơn việc chỉ chọn một trong hai mô hình; ví dụ
+    alpha 0,25 giữ GoPro trong 0,77 dB của checkpoint công khai mà vẫn tăng +4,39 dB trên `test_in`;
+(3) đánh đổi miền **không xóa được bằng nội suy hậu kỳ**: muốn một mô hình tốt ở cả hai miền cần đưa ảnh thật vào lúc
+    train (trộn dữ liệu GoPro thật với ảnh tổng hợp), ghi vào hướng phát triển. Không chọn alpha để dùng (không có tập
+    kiểm định GoPro riêng).
+
 ## Log chẩn đoán khi train
 
 `diag.jsonl` (mỗi `diag_every` = 500 iter): ‖W‖ lớp cuối của SFT head theo stage (`w_sft_<stage>`),
