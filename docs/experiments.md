@@ -277,6 +277,19 @@ val_spearman > 0,2 ở bước 1.500); C4 tổng chi phí dự tính <= 30 USD c
 Kết quả cổng C1 (2026-10-13, CPU local, `estimator_learnability.py --models v2`, đúng module `BlurMapEstimatorV2`):
 R = 1 Spearman 0,41 theo pixel / 0,73 theo patch; R từ 1 đến 4 Spearman 0,49 theo pixel / **0,75 theo patch** (ngưỡng 0,5),
 loss test 0,0149 so với 0,0205 của bản đồ hằng. **Đạt.** E gốc cùng thiết lập: Spearman khoảng 0.
+Kết quả các cổng trên Modal (2026-10-13, commit `c181ed2`, NVIDIA L4, torch 2.11.0+cu128; dữ liệu Volume `sad-runs`:
+4.325 PNG hợp lệ sau khi thay 1 file bị Kaggle trả về trang lỗi 502 (`train/GOPR0374_11_00/sharp/000016.png`, tải lại
+SHA-256 `a2bdc2d37cd18ea2743b02b124af1fed0ac1f79bb9309603184ee06f41abc0d7`), md5 checkpoint khớp DATA_INFO, val40 sha
+`96ca0c00be35f399`):
+(1) C2 nền tảng: SA-12 seed 1 trên Modal, val bước 0 = 26,656018 (Kaggle 26,656018), bước 2.500 = 32,537689 (Kaggle
+    32,526283), chênh +0,011 dB <= 0,02. **Đạt**;
+(2) C3 pilot 1.500 bước (cùng Modal, cùng seed, cùng lịch): SA-32 val 31,269 / 32,114 ở bước 750 / 1.500, **đạt**;
+    SA-14 (QĐ-08) 31,079 / 31,813, không có bước không hữu hạn (bản A3 gốc dừng ở bước 84), **đạt**;
+    SA-33 31,060 / 31,789, val_spearman 0,003 → 0,090 → 0,141, MAE 0,168 (< 0,177 của bản đồ hằng), **không đạt ngưỡng 0,2**;
+(3) C4: 1,73-1,87 it/s trên L4 (data_frac 0), khoảng 4,8 giờ mỗi run 30k; ba run full nằm trong 30 USD.
+Cổng bổ sung C3b cho SA-33 (khai báo 2026-10-13 sau pilot, TRƯỚC khi có số của run full): pilot nén lịch cosine vào 1.500
+bước nên E chỉ có khoảng 500 bước ở lr cao; SA-33 chạy full nhưng **dừng nếu val_spearman ở bước 5.000 < 0,2**. Đây là điều
+chỉnh cổng sau pilot, báo cáo kèm lý do.
 Cài đặt: `BlurMapEstimatorV2` (modules.py), `build_variant(..., estimator=)`, `make_loss(..., map_source=)`,
 `val_metrics(..., map_source=)`, `scripts/modal_train.py`; test `test_estimator_v2_identity_at_init_and_no_image_wide_statistics`,
 `test_oracle_map_source_feeds_the_true_map_in_loss_and_val`.

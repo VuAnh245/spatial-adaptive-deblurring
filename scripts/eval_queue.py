@@ -38,8 +38,10 @@ from spatial_deblur.utils.config import load_config
 MODELS = {"SA-00": "configs/experiments/SA-10_a0.yaml",  # public checkpoint, A0 architecture
           "SA-10": "configs/experiments/SA-10_a0.yaml", "SA-11": "configs/experiments/SA-11_a0plus.yaml",
           "SA-12": "configs/experiments/SA-12_a1.yaml", "SA-13": "configs/experiments/SA-13_a2.yaml",
-          "SA-14": "configs/experiments/SA-14_a3.yaml"}
-TRAINED = ["SA-10", "SA-11", "SA-12", "SA-13", "SA-14"]
+          "SA-14": "configs/experiments/SA-14_a3.yaml",
+          "SA-32": "configs/experiments/SA-32_a2_oracle_train.yaml",   # QĐ-10: oracle mode only
+          "SA-33": "configs/experiments/SA-33_a2_estimator_v2.yaml"}   # QĐ-10: like SFT-Map
+TRAINED = ["SA-10", "SA-11", "SA-12", "SA-13", "SA-14", "SA-33"]   # pred-mode models (SA-32 handled apart)
 SYN_OTHER = ["test_ood", "test_straight", "test_curved"]
 COST = {"pred": 1.0, "oracle": 1.0, "shuffle": 1.15}  # shuffle runs the estimator twice
 
@@ -62,9 +64,13 @@ def jobs_by_tier(have: set[tuple[str, int]], synthetic_root: Path) -> list[tuple
     j += [(1, e, s, "test_in", "pred", "tlc") for e, s in extra + pub]
     j += [(1, e, 1, "gopro_test", "pred", "tlc") for e in s1]
     j += [(2, e, 1, sp, "pred", "tlc") for sp in SYN_OTHER for e in s1]
-    if ("SA-13", 1) in have:
-        j += [(2, "SA-13", 1, "test_in", m, "tlc") for m in ("oracle", "shuffle")]
-        j += [(3, "SA-13", 1, sp, m, "tlc") for sp in SYN_OTHER for m in ("oracle", "shuffle")]
+    for e in ("SA-13", "SA-33"):  # models with a supervised estimator: SA-20 / SA-21
+        if (e, 1) in have:
+            j += [(2, e, 1, "test_in", m, "tlc") for m in ("oracle", "shuffle")]
+            j += [(3, e, 1, sp, m, "tlc") for sp in SYN_OTHER for m in ("oracle", "shuffle")]
+    if ("SA-32", 1) in have:  # trained with the true map: only the oracle mode is meaningful, no GoPro (no S there)
+        j += [(1, "SA-32", 1, "test_in", "oracle", "tlc")]
+        j += [(2, "SA-32", 1, sp, "oracle", "tlc") for sp in SYN_OTHER]
     j += [(2, e, s, "gopro_test", "pred", "tlc") for e, s in extra + pub]
     j += [(3, e, s, sp, "pred", "tlc") for sp in SYN_OTHER for e, s in extra]
     for noisy in ["test_in_noise2x", "test_in_noise4x"]:
@@ -100,7 +106,8 @@ def plan(a) -> None:
     assert not missing, f"checkpoint file missing for {missing}"
     out = Path(a.out)
     jobs, load, done, excluded = [], [0.0] * a.shards, 0, 0
-    tiered = sorted(jobs_by_tier(set(ckpts), Path(d["synthetic_root"])), key=lambda j: j[0])  # stable: tier order
+    tiered = sorted((j for j in jobs_by_tier(set(ckpts), Path(d["synthetic_root"])) if j[0] <= a.max_tier),
+                    key=lambda j: j[0])  # stable: tier order
     for tier, exp, seed, split, mode, pool in tiered:
         job = {"tier": tier, "exp": exp, "seed": seed, "split": split, "mode": mode, "pool": pool,
                "config": MODELS[exp], "ckpt": ckpts[(exp, seed)], "stem": stem(exp, split, mode, pool)}
@@ -181,6 +188,7 @@ def main() -> None:
     ap.add_argument("--ckpts", default="results/eval/ckpts.json",
                     help="plan: {'SA-10': path, 'SA-13_seed2': path, 'SA-00': public A0 state_dict, ...}")
     ap.add_argument("--exclude", nargs="*", default=[], help="plan: fnmatch patterns on '<stem>@<seed>'")
+    ap.add_argument("--max-tier", type=int, default=5, help="plan: drop jobs of later tiers (budget)")
     ap.add_argument("--shards", type=int, default=2)
     ap.add_argument("--shard", type=int, default=0)
     ap.add_argument("--device", default="cuda:0")

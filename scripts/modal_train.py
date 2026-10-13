@@ -6,6 +6,9 @@
     python -m modal run --detach scripts/modal_train.py::train --config configs/experiments/SA-32_a2_oracle_train.yaml --iterations 1500 --val-every 750 --ckpt-every 750 --tag pilot
     python -m modal run --detach scripts/modal_train.py::train --config configs/experiments/SA-32_a2_oracle_train.yaml
     python -m modal volume get sad-runs results/SA-32_seed1 results/modal/
+    python -m modal run scripts/modal_train.py::make_testsets                 # once: test sets, sha must match Kaggle
+    python -m modal run --detach scripts/modal_train.py::evaluate_all --max-tier 4 --shards 2
+    python -m modal volume get sad-runs eval results/modal_eval/
 
 Guarantees (each checked, not assumed):
 - code: the image holds src/, scripts/, configs/, analysis/ of the local repo; launching refuses a working tree with
@@ -162,6 +165,132 @@ def _bad_pngs_one(p: Path) -> bool:
         return False
     except Exception:
         return True
+
+
+# ----------------------------------------------------------------------------------------------- evaluation (QĐ-09/10)
+# Test sets registered by sad-checks V3 (Kaggle, numpy 2.1.3 / scipy 1.16.3, the versions pinned in this image).
+REGISTERED_TESTSETS = {"test_in": {"n": 400, "sha": "13b027f23ec17c0f"}, "test_ood": {"n": 100, "sha": "a6e491a2502d099c"},
+                       "test_straight": {"n": 50, "sha": "d6936aac831e864f"}, "test_curved": {"n": 50, "sha": "ee6b893c9aa2c23a"}}
+SPLITS = list(REGISTERED_TESTSETS)
+# Kaggle-trained checkpoints uploaded to /vol/ckpts/<run>/final.pth (scripts in the evaluation section of docs).
+KAGGLE_RUNS = ["SA-10_seed1", "SA-11_seed1", "SA-12_seed1", "SA-13_seed1", "SA-12_seed2", "SA-13_seed2",
+               "SA-12_seed3", "SA-13_seed3"]
+MODAL_RUNS = ["SA-14_seed1", "SA-32_seed1", "SA-33_seed1"]
+
+
+def _link_repo(synthetic: bool) -> None:
+    """cwd /root/sad with data/GOPRO_Large, checkpoints, manifests and (optionally) the persisted test sets."""
+    os.chdir("/root/sad")
+    links = [("data/GOPRO_Large", "/vol/sad-data/gopro"),
+             ("checkpoints/NAFNet-GoPro-width32.pth", "/vol/sad-data/ckpt/NAFNet-GoPro-width32.pth")]
+    if synthetic:
+        links += [(f"data/synthetic/{s}", f"/vol/synthetic/{s}") for s in SPLITS]
+    for link, target in links:
+        assert Path(target).exists(), f"{target} missing"
+        Path(link).parent.mkdir(parents=True, exist_ok=True)
+        if not Path(link).is_symlink():
+            Path(link).symlink_to(target)
+    man = subprocess.run(["python", "scripts/build_manifests.py", "--gopro", "data/GOPRO_Large"],
+                         capture_output=True, text=True, check=True).stdout
+    assert "train 1903" in man and "test 1111" in man, man
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, cpu=8.0, memory=32768, timeout=3 * 3600)
+def make_testsets() -> dict:
+    """Generate the four synthetic test sets ONCE into /vol/synthetic and require the sha registered on Kaggle."""
+    _link_repo(synthetic=False)
+    Path("/vol/eval").mkdir(parents=True, exist_ok=True)
+    r = subprocess.run(["python", "-u", "scripts/make_testsets.py", "--temp", "/vol/synthetic",
+                        "--registry", "/vol/eval/testsets_sha.json", "--expect", json.dumps(REGISTERED_TESTSETS)],
+                       capture_output=True, text=True)
+    print(r.stdout[-3000:], r.stderr[-2000:], flush=True)
+    VOL.commit()
+    assert r.returncode == 0, "test sets differ from the registered sha (or generation failed)"
+    return json.loads(Path("/vol/eval/testsets_sha.json").read_text())
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, cpu=4.0, memory=16384, timeout=3600)
+def eval_plan(max_tier: int, shards: int) -> dict:
+    """ckpts.json (Kaggle runs uploaded to /vol/ckpts, Modal runs that finished, public checkpoint as A0), checkpoint
+    sha256 into /vol/eval/meta.json, then eval_queue plan. Seed-1 GoPro CSVs verified on Kaggle are copied in by the
+    user (they count as done, never recomputed)."""
+    import torch
+    _link_repo(synthetic=True)
+    for s, want in REGISTERED_TESTSETS.items():
+        assert len(list(Path(f"data/synthetic/{s}").glob("*.npz"))) == want["n"], f"{s} incomplete - run make_testsets"
+    ck = {}
+    for run in KAGGLE_RUNS:
+        p = Path(f"/vol/ckpts/{run}/final.pth")
+        assert p.exists(), f"{p} missing - upload it first"
+        ck[run] = p
+    for run in MODAL_RUNS:
+        p = Path(f"/vol/results/{run}/final.pth")
+        if p.exists():
+            ck[run] = p
+    pub = Path("/vol/ckpts/SA-00_public_A0.pth")
+    if not pub.exists():
+        import sys
+        sys.path.insert(0, "/root/sad/src")
+        from spatial_deblur.models.nafnet import load_official_checkpoint
+        from spatial_deblur.modulation.variants import build_variant
+        m = build_variant("A0")
+        rep = load_official_checkpoint(m, "checkpoints/NAFNet-GoPro-width32.pth", strict=False)
+        assert not rep.missing_keys and not rep.unexpected_keys, rep
+        pub.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(m.state_dict(), pub)
+    ck["SA-00_seed1"] = pub
+    sha = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()  # noqa: E731
+    meta = {"commit": os.environ.get("GIT_COMMIT"), "gpu": "NVIDIA L4", "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "testsets": json.loads(Path("/vol/eval/testsets_sha.json").read_text()),
+            "ckpt": {run: {"path": str(p), "sha256": sha(p)} for run, p in ck.items()}}
+    Path("/vol/eval/meta.json").write_text(json.dumps(meta, indent=1))
+    keys = {run.replace("_seed1", ""): str(p) for run, p in ck.items()}  # eval_queue: bare ID = seed 1
+    Path("/vol/eval/ckpts.json").write_text(json.dumps(keys, indent=1))
+    r = subprocess.run(["python", "scripts/eval_queue.py", "plan", "--ckpts", "/vol/eval/ckpts.json", "--out", "/vol/eval",
+                        "--shards", str(shards), "--max-tier", str(max_tier), "--sec-per-img", "1.3"],
+                       capture_output=True, text=True)
+    print(r.stdout, r.stderr[-2000:], flush=True)
+    VOL.commit()
+    assert r.returncode == 0, "plan failed"
+    return {"ckpt": {k: v["sha256"][:16] for k, v in meta["ckpt"].items()}, "plan": r.stdout[-1500:]}
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=8.0, memory=32768, timeout=8 * 3600)
+def eval_shard(shard: int, shards: int, hours: float) -> str:
+    _link_repo(synthetic=True)
+    deadline = time.time() + hours * 3600
+    stop = threading.Event()
+
+    def keeper():
+        while not stop.wait(300):
+            VOL.commit()
+
+    threading.Thread(target=keeper, daemon=True).start()
+    r = subprocess.run(["python", "-u", "scripts/eval_queue.py", "run", "--shard", str(shard), "--shards", str(shards),
+                        "--device", "cuda:0", "--deadline", str(deadline), "--out", "/vol/eval", "--sec-per-img", "1.3"],
+                       capture_output=True, text=True)
+    stop.set()
+    VOL.commit()
+    print(r.stdout[-4000:], r.stderr[-2000:], flush=True)
+    return r.stdout[-2000:]
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, cpu=1.0, memory=4096, timeout=10 * 3600)
+def evaluate_all(max_tier: int = 4, shards: int = 2, hours: float = 6.0) -> dict:
+    """Orchestrator (run with --detach): plan, then the shards in parallel on separate L4 containers. No metric is
+    printed; tables are made afterwards with analysis/eval_tables.py on the downloaded CSVs."""
+    plan = eval_plan.remote(max_tier, shards)
+    print(json.dumps(plan, indent=1), flush=True)
+    outs = list(eval_shard.map(range(shards), kwargs={"shards": shards, "hours": hours}))
+    VOL.reload()
+    status = {}
+    for k in range(shards):
+        p = Path(f"/vol/eval/queue_shard{k}.jsonl")
+        for x in p.read_text().splitlines() if p.exists() else []:
+            row = json.loads(x)
+            status[row["status"]] = status.get(row["status"], 0) + 1
+    print("queue status counts:", status, flush=True)
+    return {"status": status, "tails": outs}
 
 
 @APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=8.0, memory=32768, timeout=24 * 3600)
