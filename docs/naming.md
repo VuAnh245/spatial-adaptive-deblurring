@@ -82,6 +82,9 @@ Ngoại lệ duy nhất: trích nguyên nhãn hình của bài báo khác, ví d
 | SA-31 | Hiệu năng tính toán |
 | SA-32 | SFT-Map huấn luyện với bản đồ thật (QĐ-10, thăm dò) |
 | SA-33 | SFT-Map với bộ ước lượng sửa (QĐ-10, thăm dò) |
+| SA-34 | Phép quét chất lượng bản đồ (QĐ-11, thăm dò) |
+| SA-35 | SFT-Free train lại trên Modal (đối chứng nền tảng) |
+| SA-36 | Nội suy trọng số Baseline (QĐ-12, thăm dò) |
 
 ### Tập dữ liệu
 
@@ -156,6 +159,8 @@ Số thập phân trong hình dùng dấu phẩy (0,45). Kết luận của `scr
 | QĐ-08 | Ổn định SFT-Map+Ch (SA-14) | "Nhánh channel đọc đặc trưng chuẩn hóa + dừng trước bước cập nhật hỏng"; loại "Giữ nguyên A3 gốc", "Hạ lr hoặc đổi batch riêng cho A3" | Đã chốt 2026-10-13 (`docs/experiments.md`) |
 | QĐ-09 | Chỉ tiêu chính, so sánh nhiều lần, gộp seed | PSNR `test_in` là chỉ tiêu chính; Holm trên họ phép so sánh lõi; Phép thử giám sát gộp 3 seed | Đã chốt 2026-10-13, sau GoPro seed 1, trước test tổng hợp |
 | QĐ-10 | Thí nghiệm thăm dò sau chẩn đoán E | "Trần bản đồ thật + bộ ước lượng sửa" (SA-32, SA-33), cổng C1-C4, tiêu chí khai báo trước | Đã chốt 2026-10-13 (`docs/experiments.md`) |
+| QĐ-11 | Bản đồ cần tốt đến mức nào | Phép quét SA-34 trên SA-32; đối chứng cùng nền tảng SA-35; quy tắc đọc xuyên nền tảng 0,02 dB | Đã chốt 2026-10-13 (`docs/experiments.md`) |
+| QĐ-12 | Đánh đổi miền sau fine-tune | Chọn "Nội suy trọng số Baseline" (SA-36, alpha 0,25/0,5/0,75, chỉ đánh giá); loại "Đóng băng thân mạng + chỉ train SFT" | Đã chốt 2026-10-14 (`docs/experiments.md`) |
 | CH-01 | Gradient của SFT head khi lớp cuối khởi tạo 0 | | Nội dung đúng, chờ câu trả lời bằng lời của sinh viên qua CH-03 |
 | CH-02 | Vì sao TLC chỉ có tác dụng khi ảnh test lớn hơn patch train | | Đạt |
 | CH-03 | Nếu `sft.*.conv2` của SFT-Free vẫn gần 0 sau 10k iter thì đường val so với Baseline thế nào, và có kết luận được gì | | Chờ trả lời |

@@ -360,6 +360,64 @@ def map_sweep(split: str = "test_in") -> str:
     return r.stdout[-1500:]
 
 
+# SA-36 (QĐ-12): endpoints = the checkpoints evaluated as SA-00 / SA-10 in round 3 (sha256 prefixes from its meta.json).
+INTERP_ENDS = {"pre": ("/vol/ckpts/SA-00_public_A0.pth", "4b4c236a25fd1f92"),
+               "ft": ("/vol/ckpts/SA-10_seed1/final.pth", "a2a43044e81c664b")}
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=4.0, memory=16384, timeout=3 * 3600)
+def weight_interp_eval(alpha: float) -> dict:
+    """One alpha: interpolated A0 checkpoint (analysis/weight_interp.py make), then scripts/evaluate.py on test_in and
+    gopro_test (TLC, --blind) into /vol/eval_interp. An existing CSV with the right row count is kept, never redone."""
+    _link_repo(synthetic=True)
+    on_vol = json.loads(Path("/vol/eval/testsets_sha.json").read_text())
+    assert on_vol.get("test_in") == REGISTERED_TESTSETS["test_in"], f"test_in on the Volume is not the official one: {on_vol}"
+    sha = lambda p: hashlib.sha256(Path(p).read_bytes()).hexdigest()  # noqa: E731
+    for name, (p, want) in INTERP_ENDS.items():
+        assert sha(p).startswith(want), f"{name} checkpoint {p} is not the one evaluated in round 3"
+    out = Path("/vol/eval_interp")
+    (out / "logs").mkdir(parents=True, exist_ok=True)
+    ckpt = Path(f"/vol/ckpts/interp/SA-36_a{alpha:g}.pth")
+    ckpt.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["python", "analysis/weight_interp.py", "make", "--pre", INTERP_ENDS["pre"][0],
+                    "--ft", INTERP_ENDS["ft"][0], "--alpha", str(alpha), "--out", str(ckpt)], check=True)
+    VOL.commit()
+    status = {}
+    for split, n in (("test_in", 400), ("gopro_test", 1111)):
+        target = out / f"SA-36_a{alpha:g}_eval_{split}_pred_tlc.csv"
+        if target.exists():
+            with target.open(encoding="utf-8") as f:
+                rows = sum(1 for _ in f) - 1
+            assert rows == n, f"{target} has {rows} rows, expected {n} - not overwritten"
+            status[split] = "skipped_done"
+            continue
+        t0 = time.time()
+        with (out / "logs" / f"{target.stem}.log").open("w", encoding="utf-8") as log:
+            rc = subprocess.run(["python", "-u", "scripts/evaluate.py", "--config", "configs/experiments/SA-10_a0.yaml",
+                                 "--ckpt", str(ckpt), "--split", split, "--mode", "pred", "--pool", "tlc",
+                                 "--device", "cuda", "--out", str(target), "--blind"],
+                                stdout=log, stderr=subprocess.STDOUT).returncode
+        status[split] = f"done {time.time() - t0:.0f}s" if rc == 0 and target.exists() else f"failed rc {rc}"
+        VOL.commit()
+    meta = {"commit": os.environ.get("GIT_COMMIT"), "gpu": "NVIDIA L4", "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "alpha": alpha, "testsets": on_vol, "status": status,
+            "ckpt": {"pre": {"path": INTERP_ENDS["pre"][0], "sha256": sha(INTERP_ENDS["pre"][0])},
+                     "ft": {"path": INTERP_ENDS["ft"][0], "sha256": sha(INTERP_ENDS["ft"][0])},
+                     "interp": {"path": str(ckpt), "sha256": sha(ckpt)}}}
+    (out / f"meta_a{alpha:g}.json").write_text(json.dumps(meta, indent=1))
+    VOL.commit()
+    print(json.dumps(status), flush=True)
+    return {"alpha": alpha, "status": status}
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, cpu=1.0, memory=2048, timeout=4 * 3600)
+def weight_interp_all(alphas: str = "0.25,0.5,0.75") -> list:
+    """SA-36 orchestrator (run with --detach): one L4 container per alpha, in parallel. No metric is printed."""
+    res = list(weight_interp_eval.map([float(x) for x in alphas.split(",")]))
+    print(json.dumps(res, indent=1), flush=True)
+    return res
+
+
 @APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=8.0, memory=32768, timeout=24 * 3600)
 def train(config: str, iterations: int = 0, val_every: int = 0, ckpt_every: int = 0, tag: str = "",
           stop_at: int = 0, num_workers: int = 6) -> dict:

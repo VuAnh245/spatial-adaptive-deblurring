@@ -503,3 +503,32 @@ def test_oracle_map_source_feeds_the_true_map_in_loss_and_val():
     from spatial_deblur.metrics.image_quality import psnr
     expect = psnr(po[0].clamp(0, 1).permute(1, 2, 0).numpy(), sharp[0].permute(1, 2, 0).numpy())
     assert abs(val_metrics(m, val, "cpu", map_source="oracle")["val_psnr"] - expect) < 1e-9
+
+
+def test_weight_interp_endpoints_midpoint_and_mismatch():
+    """SA-36 (QĐ-12): alpha 0 / 1 give the two checkpoints exactly, 0.5 their mean; different keys are refused."""
+    import importlib.util
+    from pathlib import Path
+
+    import pytest
+
+    path = Path(__file__).resolve().parents[1] / "analysis" / "weight_interp.py"
+    spec = importlib.util.spec_from_file_location("weight_interp", path)
+    wi = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wi)
+    torch.manual_seed(0)
+    pre, ft = build_variant("A0", TINY), build_variant("A0", TINY)
+    for p in ft.parameters():
+        p.data.normal_(0, 0.1)
+    sp, sf = pre.state_dict(), ft.state_dict()
+    for k in sp:
+        assert torch.equal(wi.interpolate(sp, sf, 0.0)[k], sp[k]), k
+        assert torch.equal(wi.interpolate(sp, sf, 1.0)[k], sf[k]), k
+        assert torch.allclose(wi.interpolate(sp, sf, 0.5)[k], (sp[k] + sf[k]) / 2, atol=1e-7), k
+    x = torch.rand(1, 3, 32, 48)
+    m = build_variant("A0", TINY)
+    m.load_state_dict(wi.interpolate(sp, sf, 0.0))
+    with torch.no_grad():
+        assert torch.equal(m(x)[0], pre(x)[0])
+    with pytest.raises(ValueError):
+        wi.interpolate(sp, build_variant("A2", TINY).state_dict(), 0.5)

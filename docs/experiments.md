@@ -429,6 +429,34 @@ bảng `results/eval/modal_round3_tables/`.
     +0,027 dB của SA-14 so với SA-13 trên GoPro đến từ SA-13 seed 1 thấp (28,349 so với SFT-Free 28,370), không phải từ nhánh
     kênh. Kết luận QĐ-08: nhánh kênh (sau khi sửa NaN) train ổn định nhưng không tạo khác biệt có ý nghĩa.
 
+## QĐ-12 Nội suy trọng số Baseline SA-36 (khai báo 2026-10-14 khoảng 02:50, trước mọi số của SA-36)
+
+Vấn đề: fine-tune trên ảnh tổng hợp tăng +8,46 dB trên `test_in` nhưng giảm -4,58 dB trên GoPro thật so với checkpoint công
+khai (đánh đổi miền). Số liệu đã có cho thấy mức tăng đến từ thân mạng: Baseline (không có SFT) 33,951 so với checkpoint
+công khai 25,608; SFT chỉ thêm +0,010 dB (Ŝ) hoặc +0,5 dB (S thật).
+Phương án đã chọn (người dùng chọn (a)): **SA-36 "Nội suy trọng số Baseline"**, chỉ đánh giá, không train:
+theta(alpha) = (1 - alpha) * theta_công khai + alpha * theta_Baseline seed 1, alpha = 0,25 / 0,5 / 0,75; mọi tensor số thực
+được nội suy (A0 và checkpoint công khai có cùng khóa và kích thước, không có SFT hay E nên không phải xử lý phần không có
+ở checkpoint công khai). Hai đầu mút là các dòng có sẵn của đợt 3: alpha = 0 là SA-00 (SHA-256 đầu `4b4c236a25fd1f92`),
+alpha = 1 là SA-10 seed 1 (`a2a43044e81c664b`); hàm Modal kiểm tra hai SHA này trước khi chạy.
+Đánh giá: `scripts/evaluate.py`, TLC, FP32, `test_in` chính thức (400) và GoPro test (1.111), Modal L4, như mọi dòng khác.
+Báo cáo (`analysis/weight_interp.py summary`):
+(1) **toàn bộ đường cong**: PSNR trung bình theo alpha trên hai tập; chênh theo video (QĐ-05, CI bootstrap 95%) so với đầu
+    mút tốt hơn ở mỗi tập (`test_in` so với SA-10, GoPro so với SA-00);
+(2) điểm có nằm **trên dây cung** nối hai đầu mút hay không (cả hai tập cao hơn trộn tuyến tính điểm số của hai đầu mút với
+    cùng alpha): nằm trên thì nội suy trọng số tốt hơn việc chỉ chọn giữa hai mô hình;
+(3) mức thua lớn nhất so với đầu mút tốt hơn, theo alpha.
+Không chọn alpha "tốt nhất" bằng tập test: đây là phân tích thăm dò, mô tả. Muốn chốt một alpha để dùng thì cần một tập
+kiểm định riêng (chưa có cho GoPro thật), ghi là giới hạn. Không thuộc họ phép so sánh chính của QĐ-09; không đổi kết luận
+về bản đồ nhòe.
+Loại phương án "Đóng băng thân mạng + chỉ train SFT": câu hỏi "mức tăng đến từ thân mạng hay SFT" đã được trả lời bằng
+Baseline; SFT-Oracle không chạy được trên ảnh thật (không có S); cần chọn thêm lr; cần khoảng 4 giờ L4 và khoảng 5 USD, sát
+trần ngân sách.
+Ngân sách: tài khoản Modal đã dùng 37,14 USD, còn 5,36 USD dưới trần 42,50 USD (ảnh chụp của người dùng lúc khoảng 02:40);
+SA-36 ước tính 1,5-2 USD (3 container L4 song song, khoảng 25-30 phút mỗi container).
+Cài đặt: `analysis/weight_interp.py` (`make`, `summary`), `scripts/modal_train.py::weight_interp_all` /
+`weight_interp_eval` (CSV vào `/vol/eval_interp`, không ghi đè), test `test_weight_interp_endpoints_midpoint_and_mismatch`.
+
 ## Log chẩn đoán khi train
 
 `diag.jsonl` (mỗi `diag_every` = 500 iter): ‖W‖ lớp cuối của SFT head theo stage (`w_sft_<stage>`),
