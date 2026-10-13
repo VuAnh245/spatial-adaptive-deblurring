@@ -415,6 +415,20 @@ SA-32 + Ŝ(SA-33) thua SFT-Free 4,71 dB: **không dùng được**. SA-32 chỉ 
 bản đồ sai; khoảng cách giữa bộ ước lượng hiện có (Spearman 0,37, MAE 0,145) và mức hòa vốn (0,7; 0,07) là kết quả định
 lượng cho hướng phát triển (train SFT head với bản đồ có nhiễu, hoặc E tốt hơn), không chạy thêm trong đồ án.
 
+Bổ sung sau SA-35 (2026-10-14 khoảng 01:50): `results/eval/modal_round3/` (77/77 job, 72 CSV trùng từng byte với đợt 2, 5 CSV
+mới của SA-35), commit `5244399`, checkpoint SA-35 SHA-256 `68ea0992bd4e4ade…` (30.000 bước, sự kiện `finished`, val 33,805),
+bảng `results/eval/modal_round3_tables/`.
+(1) Lệch nền tảng ở bước 30.000 (SA-35 Modal so với SA-12 seed 1 Kaggle, cùng công thức và seed): `test_in` -0,004 dB,
+    `test_ood` -0,003, `test_straight` -0,005, `test_curved` +0,008, GoPro +0,002; đều < 0,02 dB (quy tắc QĐ-10/11 (2)).
+(2) QĐ-10 chính thức (so với SA-35, cùng máy): SA-32 `test_in` +0,499 dB [+0,434; +0,588], `test_ood` +0,641, `test_straight`
+    +0,154, `test_curved` +0,224, **có hiệu quả** trên cả 4 tập; SA-33 `test_in` +0,003 [-0,002; +0,010], `test_ood` +0,007,
+    `test_straight` +0,007, `test_curved` -0,000, **không phân biệt được với dao động giữa seed**.
+(3) SA-14 so với SA-35 (cùng máy, đọc thăm dò bằng ngưỡng QĐ-10, không thuộc họ so sánh khai báo trước): `test_in` +0,011 dB
+    [+0,006; +0,017], `test_ood` +0,013, `test_straight` +0,012, `test_curved` +0,009, GoPro +0,001 [-0,022; +0,022]. Chênh
+    dương nhất quán nhưng dưới ngưỡng 3SD (0,0146 dB trên `test_in`): **không phân biệt được với dao động giữa seed**. Mức
+    +0,027 dB của SA-14 so với SA-13 trên GoPro đến từ SA-13 seed 1 thấp (28,349 so với SFT-Free 28,370), không phải từ nhánh
+    kênh. Kết luận QĐ-08: nhánh kênh (sau khi sửa NaN) train ổn định nhưng không tạo khác biệt có ý nghĩa.
+
 ## Log chẩn đoán khi train
 
 `diag.jsonl` (mỗi `diag_every` = 500 iter): ‖W‖ lớp cuối của SFT head theo stage (`w_sft_<stage>`),
