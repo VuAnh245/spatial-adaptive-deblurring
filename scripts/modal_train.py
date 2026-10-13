@@ -1,6 +1,7 @@
 """Training on Modal (QĐ-10): SA-32, SA-33, SA-14 and the platform check, with the recipe of QĐ-04 unchanged.
 
     python -m modal run scripts/modal_train.py::prepare                       # once: data into the Volume
+    python -m modal run scripts/modal_train.py::verify_data                   # every PNG + ckpt md5; re-download broken
     python -m modal run --detach scripts/modal_train.py::train --config configs/experiments/SA-12_a1.yaml --tag modalcheck --stop-at 2500
     python -m modal run --detach scripts/modal_train.py::train --config configs/experiments/SA-32_a2_oracle_train.yaml --iterations 1500 --val-every 750 --ckpt-every 750 --tag pilot
     python -m modal run --detach scripts/modal_train.py::train --config configs/experiments/SA-32_a2_oracle_train.yaml
@@ -95,6 +96,74 @@ def prepare() -> dict:
     return info
 
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def _bad_pngs(root: Path, deep: bool) -> list[str]:
+    """PNG files that are not images. 2026-10-13: the Kaggle download stored a '502 Server Error' HTML page as
+    gopro/train/GOPR0374_11_00/sharp/000016.png (332 bytes). deep=True also checks every chunk CRC (PIL verify)."""
+    from concurrent.futures import ThreadPoolExecutor
+    from PIL import Image
+
+    def bad(p: Path) -> bool:
+        try:
+            with p.open("rb") as f:
+                if f.read(8) != PNG_MAGIC:
+                    return True
+            if deep:
+                with Image.open(p) as im:
+                    im.verify()
+            return False
+        except Exception:
+            return True
+
+    files = sorted(root.rglob("*.png"))
+    with ThreadPoolExecutor(16) as ex:
+        flags = list(ex.map(bad, files))
+    return [str(p.relative_to(root)) for p, b in zip(files, flags) if b]
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, secrets=[modal.Secret.from_name("kaggle")], cpu=4.0,
+              memory=16384, timeout=2 * 3600)
+def verify_data(repair: bool = True) -> dict:
+    """Deep check of /vol/sad-data (every PNG + checkpoint md5 from DATA_INFO.txt); re-download broken files one
+    by one (exact --file-pattern, forced, up to 6 tries 30 s apart). Fails if anything is still broken."""
+    import re
+    data = Path("/vol/sad-data")
+    bad = _bad_pngs(data, deep=True)
+    print(f"broken PNG before repair: {len(bad)} {bad[:20]}", flush=True)
+    for rel in bad if repair else []:
+        for attempt in range(6):
+            subprocess.run(["kaggle", "kernels", "output", "xunanhv/sad-data", "-p", str(data), "-o", "-q",
+                            "--file-pattern", f"^{re.escape(rel)}$"], check=False)
+            if not _bad_pngs_one(data / rel):
+                print(f"repaired {rel} (try {attempt + 1})", flush=True)
+                break
+            time.sleep(30)
+    still = _bad_pngs(data, deep=True)
+    md5 = hashlib.md5((data / "ckpt/NAFNet-GoPro-width32.pth").read_bytes()).hexdigest()
+    want = re.search(r"ckpt md5: ([0-9a-f]{32})", (data / "DATA_INFO.txt").read_text())
+    info = {"png_total": len(list(data.rglob("*.png"))), "broken_before": len(bad), "broken_after": len(still),
+            "still_broken": still[:20], "ckpt_md5_ok": bool(want and md5 == want.group(1))}
+    VOL.commit()
+    print(json.dumps(info, indent=1), flush=True)
+    assert not still and info["ckpt_md5_ok"], info
+    return info
+
+
+def _bad_pngs_one(p: Path) -> bool:
+    from PIL import Image
+    try:
+        with p.open("rb") as f:
+            if f.read(8) != PNG_MAGIC:
+                return True
+        with Image.open(p) as im:
+            im.verify()
+        return False
+    except Exception:
+        return True
+
+
 @APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=8.0, memory=32768, timeout=24 * 3600)
 def train(config: str, iterations: int = 0, val_every: int = 0, ckpt_every: int = 0, tag: str = "",
           stop_at: int = 0, num_workers: int = 6) -> dict:
@@ -110,6 +179,8 @@ def train(config: str, iterations: int = 0, val_every: int = 0, ckpt_every: int 
             Path(link).symlink_to(target)
     n_val, val_sha = _val_sha(Path("data/synthetic/val"))
     assert n_val == 40 and val_sha == EXPECTED_VAL, (n_val, val_sha)
+    bad = _bad_pngs(Path("/vol/sad-data"), deep=False)  # fast header check of every PNG before spending GPU time
+    assert not bad, f"{len(bad)} broken PNG files {bad[:5]} - run scripts/modal_train.py::verify_data first"
     man = subprocess.run(["python", "scripts/build_manifests.py", "--gopro", "data/GOPRO_Large"],
                          capture_output=True, text=True, check=True).stdout
     assert "train 1903" in man and "test 1111" in man, man
