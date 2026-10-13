@@ -258,6 +258,45 @@ SA-13_seed3 và SA-12_seed3: returncode 0, sự kiện cuối `finished`, `train
 Tesla T4 / torch 2.11.0+cu128, 712 tensor hữu hạn; `final.pth` SHA-256 bắt đầu `6a112859ba5bf287` (SA-13) và `94973423c3de5800`
 (SA-12). Train lõi: 8/9 run xong (thiếu SA-14). Registry chưa cập nhật cho seed 3.
 
+## Kết quả đánh giá đợt 1 (Modal, 2026-10-13; QĐ-01 TLC, QĐ-05, QĐ-09)
+
+Nguồn: `results/eval/modal_round1/` (50 CSV, mỗi CSV đủ số ảnh, ID không trùng, PSNR/SSIM hữu hạn), bảng
+`results/eval/modal_round1_tables/` (`analysis/eval_tables.py --unblind`, gate: commit `docs/experiments.md` hiện hành).
+Checkpoint 8 run Kaggle trên Volume khớp SHA-256 bản local; test set chính thức (sổ trong `scripts/modal_train.py`);
+`regen_val_diff`: val40 sinh lại trên Modal trùng từng bit với 40 file gốc (40/40, sai khác lớn nhất 0), nên môi trường Modal
+tái lập đúng môi trường sinh val khi train; môi trường lệch là phiên CPU của sad-checks V3. Kiểm tra pipeline trên toàn
+GoPro test: checkpoint công khai qua `evaluate.py` cho 32,8705 dB uint8 (SA-00: 32,870).
+
+PSNR trung bình (dB, float, TLC):
+
+| Mô hình | `test_in` | GoPro thật |
+| --- | --- | --- |
+| Checkpoint công khai (không fine-tune) | 25,608 | 32,882 |
+| Baseline (SA-10) | 33,951 | 28,370 |
+| Baseline-L (SA-11) | 33,954 | 28,367 |
+| SFT-Free (SA-12), seed 1 / 2 / 3, trung bình | 33,960 / 33,965 / 33,956; 33,960 | 28,370 / 28,342 / 28,344; 28,352 |
+| SFT-Map (SA-13), seed 1 / 2 / 3, trung bình | 33,959 / 33,964 / 33,956; 33,960 | 28,349 / 28,349 / 28,343; 28,347 |
+
+Chỉ tiêu chính (`test_in`, Holm trên 3 phép so sánh lõi):
+(1) Phép thử giám sát (SFT-Map so với SFT-Free, trung bình 3 seed): -0,001 dB [-0,002; +0,002], p_holm 0,098, **không khác
+    biệt**; từng seed -0,001 / -0,002 / +0,001;
+(2) Phép thử tham số (SFT-Map so với Baseline-L, seed 1): +0,006 dB [+0,001; +0,014], p 0,014, p_holm 0,041. Luật verdict ghi
+    "SFT-Map tốt hơn" vì p_holm < 0,05, nhưng độ lớn 0,006 dB không có ý nghĩa thực tế (ngưỡng 0,1 dB) và **không bền**: với
+    trung bình 3 seed thì +0,008 dB, p 0,49;
+(3) Phép thử điều biến (SFT-Free so với Baseline, seed 1): +0,010 dB, p_holm 0,098, **không khác biệt**.
+Độ lệch chuẩn giữa 3 seed của SFT-Free trên `test_in`: 0,0049 dB (ngưỡng QĐ-10: 3 lần = 0,0146 dB).
+
+Cơ chế (SFT-Map seed 1, `test_in`): Ŝ có MAE 0,180, Spearman 0,042. SA-21 (xáo trộn bản đồ giữa các ảnh) đổi 0,000 dB, tức
+bản đồ không mang thông tin được dùng. SA-20 (đưa S thật vào mô hình đã train với bản đồ gần hằng) **làm giảm** 0,174 dB
+(`test_ood` -0,241, `test_straight` -0,253, `test_curved` -0,495): SFT head chỉ học với đầu vào gần hằng nên bản đồ thật là
+đầu vào lạ. Nhóm theo H (QĐ-03): bốn mô hình fine-tune ngang nhau ở mọi nhóm (R = 1 khoảng 35,87; ba nhóm H khoảng 33,1-33,5);
+checkpoint công khai giảm theo H (27,50 → 26,11 → 24,85 → 24,00).
+Đánh đổi miền: fine-tune tăng 8,46 dB trên `test_in` [6,29; 12,03] và giảm 4,58 dB trên GoPro thật [-5,38; -3,76] so với
+checkpoint công khai (seed 1, theo video).
+Chỉ tiêu phụ: trên `test_ood`, `test_straight`, `test_curved` và GoPro, mọi phép so sánh lõi đều **không khác biệt** sau Holm
+(|chênh| <= 0,021 dB). GoPro seed 1 trước đây (Phép thử giám sát -0,024 dB, p 0,049) không bền: trung bình 3 seed -0,006 dB,
+p_holm 0,32.
+
 ## QĐ-10 Thí nghiệm thăm dò sau chẩn đoán E (chốt 2026-10-13, trước mọi run SA-32/33)
 
 Đã duyệt kèm: SA-14 (QĐ-08) xếp thứ ba, chỉ chạy nếu chi phí đo ở pilot cho phép; cắt RealBlur-J, LPIPS và SA-26 (đưa vào

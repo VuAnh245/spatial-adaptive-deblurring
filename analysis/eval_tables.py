@@ -41,7 +41,8 @@ import numpy as np
 
 from spatial_deblur.metrics.stats import group_mean, paired_comparison, verdict
 from spatial_deblur.utils.config import load_config
-from spatial_deblur.utils.labels import MODE_LABELS, POOL_LABELS, comparison_label, model_label, split_label
+from spatial_deblur.utils.labels import (MODE_LABELS, POOL_LABELS, comparison_label, experiment_label, model_label,
+                                         split_label)
 
 STEM = re.compile(r"(?P<exp>SA-\d\d)_eval_(?P<split>.+)_(?P<mode>pred|oracle|shuffle)_(?P<pool>tlc|global)$")
 HIDDEN = {"SA-11", "SA-12"}  # pair 2: Baseline-L, SFT-Free
@@ -53,7 +54,7 @@ PRIMARY_SPLIT = "test_in"
 
 
 def git(*args) -> str:
-    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+    return subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8").stdout.strip()
 
 
 def unblind_gate() -> str:
@@ -231,11 +232,29 @@ def main() -> None:
                     sa, video = scores(data, x, split, (1,))
                     res = compare(sa, scores(data, y, split, (1,))[0], video)
                 item(split, comparison_label(x, y), f"{x} pred", f"{y} pred", "secondary", "seed 1", res)
-        for m in ("oracle", "shuffle"):
-            if ("SA-13", split, m, "tlc", 1) in data and have("SA-13"):
-                sa, video = scores(data, "SA-13", split, (1,), mode=m)
-                item(split, MODE_LABELS[m], f"SA-13 {m}", "SA-13 pred", "secondary", "seed 1",
-                     compare(sa, scores(data, "SA-13", split, (1,))[0], video))
+        for e in ("SA-13", "SA-33"):
+            for m in ("oracle", "shuffle"):
+                if (e, split, m, "tlc", 1) in data and have(e):
+                    sa, video = scores(data, e, split, (1,), mode=m)
+                    item(split, MODE_LABELS[m], f"{e} {m}", f"{e} pred", "secondary", "seed 1",
+                         compare(sa, scores(data, e, split, (1,))[0], video))
+        # QĐ-10 (exploratory, declared before the runs): SA-32 (oracle mode) and SA-33 (pred) against SFT-Free and
+        # Baseline seed 1; "có hiệu quả" only if diff > 3 x SD of the SFT-Free seed means on this split AND CI low > 0.
+        sf = [mean(data[("SA-12", split, "pred", "tlc", s)], "psnr") for s in (1, 2, 3) if have("SA-12", s)]
+        floor = 3 * float(np.std(sf, ddof=1)) if len(sf) == 3 else None
+        for x, mode in (("SA-32", "oracle"), ("SA-33", "pred")):
+            if (x, split, mode, "tlc", 1) not in data:
+                continue
+            for y in ("SA-12", "SA-10", "SA-13"):
+                if not have(y):
+                    continue
+                sa, video = scores(data, x, split, (1,), mode=mode)
+                res = compare(sa, scores(data, y, split, (1,))[0], video)
+                res["seed_noise_floor_3sd"] = floor
+                ok = floor is not None and res["mean_diff"] > floor and res["ci_low"] > 0
+                res["qd10_label"] = "có hiệu quả" if ok else "không phân biệt được với dao động giữa seed"
+                item(split, f"QĐ-10: {experiment_label(x)} so với {model_label(y)}", f"{x} {mode}", f"{y} pred", "qd10",
+                     "seed 1", res)
 
     for c in comps:
         r = c["result"]
@@ -260,6 +279,8 @@ def main() -> None:
             holm_txt = f" p_holm {r['p_holm']:.3f} -> {r['verdict_holm_label']} |" if "p_holm" in r else ""
             txt = (f"diff {r['mean_diff']:+.3f} dB [{r['ci_low']:+.3f}, {r['ci_high']:+.3f}] p {r['wilcoxon_p']:.3f}"
                    f" ({r['verdict_raw_label']}) |{holm_txt} groups {r['n_groups']} | win img {r['win_rate_images']:.2f}")
+        if isinstance(r, dict) and "qd10_label" in r:
+            txt += f" | 3SD {r['seed_noise_floor_3sd']:.4f} -> {r['qd10_label']}" if r["seed_noise_floor_3sd"] else ""
         star = "*" if c["primary_endpoint"] and c["family"] == "core" else " "
         print(f" {star}{c['split']:16s} {c['family']:11s} {c['comparison_label'][:34]:34s} {c['aggregation'][:24]:24s} {txt}")
         if c.get("per_seed_mean_diff"):
