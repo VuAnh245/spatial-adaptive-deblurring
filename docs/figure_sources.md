@@ -43,6 +43,6 @@ Hình 3(d) trong bài báo NAFNet là NAFBlock. Với các paper khác, tìm hì
 
 Quy ước mã và tên: `docs/naming.md`. So sánh độ sáng và nhiễu GoPro với RealBlur chỉ làm nếu tải RealBlur-J (tùy chọn).
 
-Cập nhật 2026-10-14: HN-02, HN-09, phần RealBlur của HT-10 và latency của HT-12 không dùng (RealBlur-J, LPIPS, SA-31 đã
-cắt theo QĐ-10; HT-12 chỉ còn bảng số tham số). HT-11 dùng ID theo quy tắc trong `notebooks/03_results.ipynb`
-(`visual_set.txt` không được tạo).
+Cập nhật 2026-10-14: không dùng HN-02, HN-09, phần RealBlur của HT-10 và phần latency của HT-12, vì RealBlur-J, LPIPS
+và SA-31 đã bị cắt theo QĐ-10; HT-12 chỉ còn bảng số tham số. HT-11 chọn ID theo quy tắc ghi trong
+`notebooks/03_results.ipynb`; file `visual_set.txt` không được tạo.

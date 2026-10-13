@@ -2,8 +2,9 @@
 
 Đồ án DL dùng GoPro (nguồn ảnh nét để sinh blur, test ngoài) và RealBlur-J (chỉ test ngoài). Dữ liệu gốc không commit; mọi split nằm trong `manifests/` kèm sha256.
 
-Cập nhật 2026-10-14: RealBlur-J **đã cắt** (QĐ-10, ngân sách và hạn), không có số liệu RealBlur trong kết quả; mục dưới
-giữ lại làm tài liệu cho hướng phát triển. Danh sách split sinh lại khi chạy (xem `manifests/README.md`).
+Cập nhật 2026-10-14: RealBlur-J đã bị cắt theo QĐ-10 (do ngân sách và thời hạn), nên kết quả không có số liệu RealBlur.
+Mục RealBlur-J bên dưới được giữ lại để tham khảo cho hướng phát triển. Danh sách split được sinh lại mỗi lần chạy (xem
+`manifests/README.md`).
 Tải tự động phần có thể bằng `bash scripts/download_data.sh`; RealBlur-J tải tay từ cổng chính thức.
 
 ## GoPro (CC BY 4.0)
