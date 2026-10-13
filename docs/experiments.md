@@ -258,6 +258,31 @@ SA-13_seed3 và SA-12_seed3: returncode 0, sự kiện cuối `finished`, `train
 Tesla T4 / torch 2.11.0+cu128, 712 tensor hữu hạn; `final.pth` SHA-256 bắt đầu `6a112859ba5bf287` (SA-13) và `94973423c3de5800`
 (SA-12). Train lõi: 8/9 run xong (thiếu SA-14). Registry chưa cập nhật cho seed 3.
 
+## QĐ-11 Phép quét chất lượng bản đồ SA-34 (khai báo 2026-10-13 lúc khoảng 19:30, trước khi SA-32/33 chạy xong và trước mọi
+## số `test_in` của chúng)
+
+Phân tích chỉ đánh giá, không train (`analysis/map_sweep.py`, `modal_train.py::map_sweep`), trên `test_in` chính thức, giao thức
+TLC: mô hình SA-32 (SFT head train với bản đồ thật) nhận lần lượt các bản đồ: S thật; trộn a·S + (1-a)·trung bình của ảnh
+với a = 0,75 / 0,5 / 0,25 / 0; S cộng nhiễu Gauss sigma = 0,05 / 0,1 / 0,2; hằng số tiên nghiệm 0,375; Ŝ của bộ ước lượng
+SA-33 (mô hình hai bước dùng được khi không có S); Ŝ của bộ ước lượng SA-13 (đối chứng). Mỗi ảnh ghi PSNR, Spearman và MAE
+của bản đồ so với S thu nhỏ 1/4.
+Câu hỏi: (1) PSNR tăng theo chất lượng bản đồ ra sao (đường cong PSNR theo Spearman); (2) chỉ biết mức nhòe chung của ảnh
+(a = 0) thì được bao nhiêu; (3) mô hình hai bước SA-32 + Ŝ(SA-33) có hơn SFT-Free seed 1 không, đọc bằng cùng tiêu chí QĐ-10
+(chênh > 3 lần độ lệch chuẩn giữa seed của SFT-Free trên `test_in` = 0,0146 dB, và CI bootstrap theo video không chứa 0).
+Đây là phân tích thăm dò, mô tả; không thuộc họ phép so sánh chính của QĐ-09.
+
+Bổ sung QĐ-10/11 (khai báo 2026-10-13 lúc khoảng 20:35, trước mọi số `test_in` của SA-32/33/14 và của đối chứng):
+(1) đối chứng cùng nền tảng **SA-35** "SFT-Free train lại trên Modal": config SA-12, seed 1, cùng công thức, Modal L4
+    (`train --config SA-12_a1.yaml --tag modal`). Phép so sánh chính của QĐ-10 là SA-32 / SA-33 so với **SA-35** (cùng máy);
+    so với SA-12 / SA-10 (Kaggle) chỉ là phụ;
+(2) quy tắc đọc xuyên nền tảng: so sánh giữa một run Modal và một run Kaggle có |chênh| < 0,02 dB được ghi "không phân giải
+    được do lệch nền tảng" (cổng C2: cùng mô hình lệch 0,011 dB ở bước 2.500); lệch nền tảng ở bước 30.000 được đo trực tiếp
+    bằng SA-35 so với SA-12 seed 1 và báo cáo;
+(3) SA-32 là **trần** của ý tưởng (dùng bản đồ thật, không có ở ứng dụng thật); SA-33, SA-34, SA-35 là thăm dò. Kết luận
+    chính của đồ án vẫn là kết quả của giao thức đã khóa (đánh giá đợt 1).
+Cài đặt: `eval_tables.py` (`MODAL_TRAINED`, `CROSS_PLATFORM_DB`, so sánh "Lệch nền tảng"), `eval_queue.py` (SA-35),
+`modal_train.py` (`MODAL_ALIASES`).
+
 ## Kết quả đánh giá đợt 1 (Modal, 2026-10-13; QĐ-01 TLC, QĐ-05, QĐ-09)
 
 Nguồn: `results/eval/modal_round1/` (50 CSV, mỗi CSV đủ số ảnh, ID không trùng, PSNR/SSIM hữu hạn), bảng

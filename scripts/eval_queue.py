@@ -40,8 +40,9 @@ MODELS = {"SA-00": "configs/experiments/SA-10_a0.yaml",  # public checkpoint, A0
           "SA-12": "configs/experiments/SA-12_a1.yaml", "SA-13": "configs/experiments/SA-13_a2.yaml",
           "SA-14": "configs/experiments/SA-14_a3.yaml",
           "SA-32": "configs/experiments/SA-32_a2_oracle_train.yaml",   # QĐ-10: oracle mode only
-          "SA-33": "configs/experiments/SA-33_a2_estimator_v2.yaml"}   # QĐ-10: like SFT-Map
-TRAINED = ["SA-10", "SA-11", "SA-12", "SA-13", "SA-14", "SA-33"]   # pred-mode models (SA-32 handled apart)
+          "SA-33": "configs/experiments/SA-33_a2_estimator_v2.yaml",   # QĐ-10: like SFT-Map
+          "SA-35": "configs/experiments/SA-12_a1.yaml"}  # SFT-Free seed 1 retrained on Modal: same-platform control
+TRAINED = ["SA-10", "SA-11", "SA-12", "SA-13", "SA-14", "SA-33", "SA-35"]  # pred-mode models (SA-32 handled apart)
 SYN_OTHER = ["test_ood", "test_straight", "test_curved"]
 COST = {"pred": 1.0, "oracle": 1.0, "shuffle": 1.15}  # shuffle runs the estimator twice
 

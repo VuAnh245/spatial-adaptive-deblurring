@@ -179,6 +179,8 @@ SPLITS = list(REGISTERED_TESTSETS)
 KAGGLE_RUNS = ["SA-10_seed1", "SA-11_seed1", "SA-12_seed1", "SA-13_seed1", "SA-12_seed2", "SA-13_seed2",
                "SA-12_seed3", "SA-13_seed3"]
 MODAL_RUNS = ["SA-14_seed1", "SA-32_seed1", "SA-33_seed1"]
+# SFT-Free seed 1 retrained on Modal (train --config SA-12_a1.yaml --tag modal) is evaluated as SA-35 (platform control).
+MODAL_ALIASES = {"SA-12_seed1_modal": "SA-35_seed1"}
 
 
 def _link_repo(synthetic: bool) -> None:
@@ -268,6 +270,10 @@ def eval_plan(max_tier: int, shards: int) -> dict:
         p = Path(f"/vol/results/{run}/final.pth")
         if p.exists():
             ck[run] = p
+    for run, alias in MODAL_ALIASES.items():
+        p = Path(f"/vol/results/{run}/final.pth")
+        if p.exists():
+            ck[alias] = p
     pub = Path("/vol/ckpts/SA-00_public_A0.pth")
     if not pub.exists():
         import sys
@@ -332,6 +338,26 @@ def evaluate_all(max_tier: int = 4, shards: int = 2, hours: float = 6.0) -> dict
             status[row["status"]] = status.get(row["status"], 0) + 1
     print("queue status counts:", status, flush=True)
     return {"status": status, "tails": outs}
+
+
+@APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=8.0, memory=32768, timeout=3 * 3600)
+def map_sweep(split: str = "test_in") -> str:
+    """SA-34 (QĐ-11): analysis/map_sweep.py on the persisted test set with SA-32 (+ SA-33 / SA-13 estimators)."""
+    _link_repo(synthetic=True)
+    ck = {"sa32": "/vol/results/SA-32_seed1/final.pth", "sa33": "/vol/results/SA-33_seed1/final.pth",
+          "sa13": "/vol/ckpts/SA-13_seed1/final.pth"}
+    for k, p in ck.items():
+        assert Path(p).exists(), f"{p} missing - wait until the run has finished"
+    out = Path(f"/vol/eval/map_sweep_{split}")
+    r = subprocess.run(["python", "-u", "analysis/map_sweep.py", "--sa32", ck["sa32"], "--sa33", ck["sa33"],
+                        "--sa13", ck["sa13"], "--split", split, "--out", str(out)], capture_output=True, text=True)
+    sha = {k: hashlib.sha256(Path(p).read_bytes()).hexdigest() for k, p in ck.items()}
+    (out / "meta.json").write_text(json.dumps({"commit": os.environ.get("GIT_COMMIT"), "ckpt_sha256": sha,
+                                               "testsets": REGISTERED_TESTSETS}, indent=1)) if out.exists() else None
+    VOL.commit()
+    print(r.stdout[-3000:], r.stderr[-2000:], flush=True)
+    assert r.returncode == 0, "map sweep failed"
+    return r.stdout[-1500:]
 
 
 @APP.function(image=image, volumes={"/vol": VOL}, gpu="L4", cpu=8.0, memory=32768, timeout=24 * 3600)

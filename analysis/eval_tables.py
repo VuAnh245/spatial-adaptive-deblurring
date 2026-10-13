@@ -51,6 +51,8 @@ METRICS = ["psnr", "psnr_u8", "ssim", "psnr_local_high", "map_mae", "map_spearma
 CORE = [("SA-13", "SA-12"), ("SA-13", "SA-11"), ("SA-12", "SA-10"), ("SA-14", "SA-13")]
 SECONDARY = [("SA-13", "SA-10"), ("SA-10", "SA-00")]
 PRIMARY_SPLIT = "test_in"
+MODAL_TRAINED = {"SA-14", "SA-32", "SA-33", "SA-35"}  # trained on Modal L4; the others on Kaggle T4
+CROSS_PLATFORM_DB = 0.02  # declared 2026-10-13 before round-2 numbers: C2 drift 0.011 dB at step 2500
 
 
 def git(*args) -> str:
@@ -225,6 +227,10 @@ def main() -> None:
             c["result"]["p_raw"] = c["result"]["wilcoxon_p"]
             c["result"]["p_holm"] = p
             c["result"]["holm_family_size"] = len(done)
+        if have("SA-35") and have("SA-12"):  # platform drift at step 30000: same config/seed, Modal L4 vs Kaggle T4
+            sa, video = scores(data, "SA-35", split, (1,))
+            item(split, "Lệch nền tảng (SFT-Free Modal so với Kaggle)", "SA-35 pred", "SA-12 pred", "secondary", "seed 1",
+                 compare(sa, scores(data, "SA-12", split, (1,))[0], video))
         for x, y in SECONDARY:
             if have(x) and have(y):
                 res = None
@@ -245,14 +251,19 @@ def main() -> None:
         for x, mode in (("SA-32", "oracle"), ("SA-33", "pred")):
             if (x, split, mode, "tlc", 1) not in data:
                 continue
-            for y in ("SA-12", "SA-10", "SA-13"):
+            for y in ("SA-35", "SA-14", "SA-12", "SA-10", "SA-13"):
                 if not have(y):
                     continue
                 sa, video = scores(data, x, split, (1,), mode=mode)
                 res = compare(sa, scores(data, y, split, (1,))[0], video)
                 res["seed_noise_floor_3sd"] = floor
+                same_platform = y in MODAL_TRAINED
+                res["same_platform"] = same_platform
                 ok = floor is not None and res["mean_diff"] > floor and res["ci_low"] > 0
-                res["qd10_label"] = "có hiệu quả" if ok else "không phân biệt được với dao động giữa seed"
+                if not same_platform and abs(res["mean_diff"]) < CROSS_PLATFORM_DB:
+                    res["qd10_label"] = "không phân giải được do lệch nền tảng"
+                else:
+                    res["qd10_label"] = "có hiệu quả" if ok else "không phân biệt được với dao động giữa seed"
                 item(split, f"QĐ-10: {experiment_label(x)} so với {model_label(y)}", f"{x} {mode}", f"{y} pred", "qd10",
                      "seed 1", res)
 
