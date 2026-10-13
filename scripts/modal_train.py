@@ -45,7 +45,7 @@ def _local_commit() -> str:
     if dirty:
         raise SystemExit(f"uncommitted changes in {CODE_DIRS} - commit and push first:\n{dirty}")
     head = git("rev-parse", "HEAD")
-    if head not in git("branch", "-r", "--contains", head):
+    if not git("branch", "-r", "--contains", head):  # lists remote branches holding HEAD; empty = not pushed
         raise SystemExit(f"HEAD {head[:7]} is not on any remote branch - push first")
     return head
 
