@@ -367,6 +367,54 @@ Cài đặt: `BlurMapEstimatorV2` (modules.py), `build_variant(..., estimator=)`
 `val_metrics(..., map_source=)`, `scripts/modal_train.py`; test `test_estimator_v2_identity_at_init_and_no_image_wide_statistics`,
 `test_oracle_map_source_feeds_the_true_map_in_loss_and_val`.
 
+## Kết quả đánh giá đợt 2: QĐ-10 và QĐ-11 (Modal, 2026-10-13, trước khi có SA-35)
+
+Nguồn: `results/eval/modal_round2/` (72/72 job của plan, 15 chạy mới + 57 có sẵn; 50 CSV trùng từng byte với đợt 1, 22 CSV
+mới của SA-14/32/33; mỗi CSV đủ số ảnh, ID không trùng, PSNR hữu hạn), commit `7e4a85b`, NVIDIA L4, test set chính thức.
+Checkpoint (SHA-256 đầu): SA-32 `006ef53c605c844c`, SA-33 `d9da3056d0909415`, SA-14 `eb7d1c9b343ed452`. Bảng:
+`results/eval/modal_round2_tables/`. Phép quét SA-34: `results/eval/map_sweep_test_in/map_sweep.csv` (400 ảnh x 11 bản đồ,
+SHA-256 `72da547765d7f2b3…`; dòng `true` trùng CSV `SA-32_eval_test_in_oracle_tlc` tới 1e-14).
+SA-35 chưa xong nên mọi so sánh dưới đây là với run Kaggle hoặc SA-14 (Modal). Phép so sánh chính với SA-35 và số đo lệch
+nền tảng sẽ bổ sung sau.
+
+PSNR `test_in` (dB, TLC): SA-32 với S thật 34,451; SA-33 33,959 (Ŝ: MAE 0,145, Spearman 0,373); SA-14 33,967; SFT-Free seed 1
+33,960.
+(1) **Trần bản đồ thật (SA-32) có hiệu quả** theo tiêu chí QĐ-10 trên cả 4 tập tổng hợp: `test_in` +0,494 dB [+0,434; +0,578]
+    so với SFT-Free seed 1 (Kaggle), +0,487 [+0,423; +0,578] so với SA-14 (cùng Modal), thắng 10/10 video, 98% ảnh;
+    `test_ood` +0,638; `test_straight` +0,149; `test_curved` +0,231 (đều > 3SD, CI không chứa 0, p 0,002). Lợi ích lớn hơn
+    hẳn mức lệch nền tảng 0,02 dB nên không phụ thuộc SA-35. Theo nhóm H: R = 1 +0,18; H thấp +0,45; H trung bình +0,68;
+    H cao +0,66; vùng nhòe nặng (`psnr_local_high`) +0,49. Tức là: khi bản đồ đúng, điều biến SFT theo không gian cải thiện
+    rõ, và cải thiện nhiều nhất ở ảnh có nhòe không đồng đều.
+(2) **Bộ ước lượng sửa (SA-33) không tạo khác biệt**: `test_in` so với SA-14 -0,008, SFT-Free -0,001, Baseline +0,009,
+    SFT-Map -0,000 dB; mọi tập đều "không phân biệt được với dao động giữa seed" hoặc "không phân giải được do lệch nền tảng".
+    SA-20 của SA-33 +0,031 dB [+0,017; +0,047], SA-21 -0,014 dB: mô hình có dùng bản đồ một phần (khác SA-13 với SA-21 = 0),
+    nhưng Ŝ có Spearman 0,37 chưa đủ để đem lại lợi ích.
+(3) SA-14 (QĐ-08, nhánh kênh): `test_in` +0,008 dB so với SA-13, p_holm 0,146, không khác biệt (chỉ tiêu chính). GoPro +0,027
+    và `test_straight` +0,012 có p_holm 0,008, nhưng SA-14 train trên Modal còn SA-13 trên Kaggle: chưa tách được khỏi lệch
+    nền tảng cho đến khi có SA-35.
+Phép quét SA-34 (QĐ-11, SA-32 trên `test_in`, chênh so với SFT-Free seed 1, CI 95% theo video):
+
+| Bản đồ đưa vào | PSNR | Spearman | MAE | Chênh (dB) |
+| --- | --- | --- | --- | --- |
+| S thật | 34,451 | 1,000 | 0,000 | +0,494 [+0,434; +0,578] |
+| Trộn a = 0,75 | 34,162 | 1,000 | 0,025 | +0,204 [+0,146; +0,284] |
+| Trộn a = 0,5 | 33,342 | 1,000 | 0,051 | -0,617 |
+| Trộn a = 0,25 | 32,126 | 1,000 | 0,076 | -1,836 |
+| Chỉ mức nhòe chung (a = 0) | 30,975 | - | 0,101 | -2,978 |
+| Nhiễu sigma 0,05 | 34,369 | 0,808 | 0,039 | +0,411 [+0,352; +0,494] |
+| Nhiễu sigma 0,1 | 33,955 | 0,693 | 0,076 | -0,009 [-0,085; +0,082] |
+| Nhiễu sigma 0,2 | 32,355 | 0,511 | 0,146 | -1,622 |
+| Hằng số 0,375 | 28,511 | - | 0,181 | -5,499 |
+| Ŝ của SA-33 (hai bước) | 29,250 | 0,364 | 0,146 | -4,705 [-4,904; -4,505] |
+| Ŝ của SA-13 | 28,537 | 0,042 | 0,180 | -5,473 |
+
+Trả lời câu hỏi QĐ-11: (1) PSNR giảm rất nhanh theo sai số bản đồ; điểm hòa vốn với SFT-Free ở khoảng Spearman 0,7 và MAE
+0,07 (nhiễu sigma 0,1); (2) chỉ biết mức nhòe chung của ảnh thì kém SFT-Free 2,98 dB: lợi ích đến từ phân bố không gian của
+nhòe, và mô hình cũng rất nhạy với biên độ (trộn a = 0,5 giữ nguyên thứ hạng nhưng thua 0,62 dB); (3) mô hình hai bước
+SA-32 + Ŝ(SA-33) thua SFT-Free 4,71 dB: **không dùng được**. SA-32 chỉ thấy bản đồ hoàn hảo khi train nên không chịu được
+bản đồ sai; khoảng cách giữa bộ ước lượng hiện có (Spearman 0,37, MAE 0,145) và mức hòa vốn (0,7; 0,07) là kết quả định
+lượng cho hướng phát triển (train SFT head với bản đồ có nhiễu, hoặc E tốt hơn), không chạy thêm trong đồ án.
+
 ## Log chẩn đoán khi train
 
 `diag.jsonl` (mỗi `diag_every` = 500 iter): ‖W‖ lớp cuối của SFT head theo stage (`w_sft_<stage>`),
