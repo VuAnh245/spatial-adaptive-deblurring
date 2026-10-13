@@ -6,6 +6,14 @@ Shared modules (`src/spatial_deblur/{data,degradations,models,classical,engine,m
 `deblurring-for-detection`. Version: **core-v0.1.0**. Freeze them after the public checkpoint numbers are reproduced
 (checklist step 4-5); every later fix is applied to both repos and recorded here.
 
+## core-v0.1.2 - 2026-10-13
+- `engine/trainer.Trainer(fail_fast_nonfinite=False)`: in FP32 (no GradScaler), a non-finite loss or gradient norm
+  stops the run BEFORE `optimizer.step` (`abort_reason` `nonfinite_loss` / `nonfinite_grad`, events
+  `aborted_nonfinite` / `aborted_nonfinite_grad`). Default off, so earlier behaviour is unchanged; the study sets it in
+  `configs/_base_/train.yaml` (QĐ-08, commit 862da1d). Apply the same change to `deblurring-for-detection`.
+- Study code only (not shared, despite living in `utils/`): `utils/labels.py` gained SA-00 and SA-32 to SA-36 labels.
+- Tag `core-v0.1.x` was never created as a git tag; versions are tracked by this file.
+
 ## core-v0.1.1 - 2026-10-05
 - `models/tlc.py`: Test-time Local Converter (port of NAFNet `local_arch.py`, exact variant).
   The official GoPro test config uses `NAFNetLocal`; without it the public width32 checkpoint scores

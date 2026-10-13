@@ -11,3 +11,12 @@ __pycache__/
 .ipynb_checkpoints/
 *.pth
 *.pt
+# large or partial artifacts that can appear outside results/ and data/
+*.npz
+*.zip
+*.part
+# credentials (also covered by the user's global ignore for .claude/settings.local.json)
+.env
+kaggle.json
+access_token
+.claude/settings.local.json
